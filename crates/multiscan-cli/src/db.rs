@@ -15,9 +15,58 @@ pub fn run(action: &DbCmd) -> Result<Exit> {
             println!("{}", cache_dir().display());
             Ok(Exit::Clean)
         }
-        DbCmd::Export | DbCmd::Import => {
-            eprintln!("multiscan: `db export/import` is not implemented yet (lands in T-306)");
-            Ok(Exit::Usage)
+        DbCmd::Export { out } => export(out),
+        DbCmd::Import {
+            bundle,
+            trusted_key,
+        } => import(bundle, trusted_key.as_deref()),
+    }
+}
+
+fn export(out: &std::path::Path) -> Result<Exit> {
+    let cache = cache_dir();
+    let key = match multiscan_feeds::load_or_create_signing_key(&cache) {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!("multiscan: error: {e}");
+            return Ok(Exit::FeedsStale);
+        }
+    };
+    match multiscan_feeds::export_bundle(&cache, out, &key) {
+        Ok(snapshot_id) => {
+            let pubkey = multiscan_feeds::to_hex(&multiscan_feeds::public_key_bytes(&key));
+            eprintln!(
+                "multiscan: exported snapshot {snapshot_id} to {} (signer {pubkey})",
+                out.display()
+            );
+            Ok(Exit::Clean)
+        }
+        Err(e) => {
+            eprintln!("multiscan: error: db export failed: {e}");
+            Ok(Exit::FeedsStale)
+        }
+    }
+}
+
+fn import(bundle: &std::path::Path, trusted_key: Option<&str>) -> Result<Exit> {
+    let trusted = match trusted_key {
+        Some(hex) => match multiscan_feeds::parse_public_key_hex(hex) {
+            Some(key) => Some(key),
+            None => {
+                eprintln!("multiscan: error: --trusted-key must be 32-byte hex");
+                return Ok(Exit::Usage);
+            }
+        },
+        None => None,
+    };
+    match multiscan_feeds::import_bundle(&cache_dir(), bundle, trusted) {
+        Ok(snapshot_id) => {
+            eprintln!("multiscan: imported snapshot {snapshot_id}");
+            Ok(Exit::Clean)
+        }
+        Err(e) => {
+            eprintln!("multiscan: error: db import failed: {e}");
+            Ok(Exit::FeedsStale)
         }
     }
 }

@@ -9,17 +9,21 @@
 //! - Staleness is never silent: too-old feeds warn, and under `--offline`
 //!   they are a hard exit-5 (FD-004).
 
+mod bundle;
 mod cache;
 mod enrich;
 mod fetch;
+mod signing;
 mod update;
 
+pub use bundle::{export as export_bundle, import as import_bundle};
 pub use cache::{
     cache_dir, current_snapshot, write_snapshot, FileMeta, Snapshot, SnapshotCounts, SnapshotData,
     SnapshotManifest,
 };
 pub use enrich::Enrichment;
 pub use fetch::{FeedClient, DEFAULT_ALLOWED_HOSTS};
+pub use signing::{load_or_create_signing_key, parse_public_key_hex, public_key_bytes, to_hex};
 pub use update::{update, FeedSources};
 
 /// Errors from the feed subsystem.

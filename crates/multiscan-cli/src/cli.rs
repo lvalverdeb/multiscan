@@ -206,10 +206,21 @@ pub enum DbCmd {
     Update,
     /// Show snapshot ages and digests
     Status,
-    /// Export a signed air-gap bundle
-    Export,
+    /// Export a signed air-gap bundle of the pinned snapshot
+    Export {
+        /// Output bundle path (e.g. bundle.tar.zst)
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
     /// Import a signed air-gap bundle
-    Import,
+    Import {
+        /// Bundle file to import
+        bundle: std::path::PathBuf,
+        /// Require the bundle to be signed by this public key (hex). Without
+        /// it, the signature only proves integrity, not authenticity.
+        #[arg(long)]
+        trusted_key: Option<String>,
+    },
     /// Print the database path
     Path,
 }
