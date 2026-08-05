@@ -103,16 +103,18 @@ release:
 	@echo "released v$(TO). next: git push && git push origin v$(TO) && make publish"
 
 ## Dry-run publish of every crate, in dependency order (no upload).
+## Static pattern rule (not an implicit `%` rule): implicit-rule search is
+## skipped for .PHONY targets, so a plain `dry-%:` would silently no-op.
 publish-dry: $(addprefix dry-,$(CRATES))
 
-dry-%:
+$(addprefix dry-,$(CRATES)): dry-%:
 	cargo publish -p multiscan-$* --locked --dry-run $(PUBLISH_FLAGS)
 
 ## Publish every crate to crates.io, in dependency order.
 ## cargo waits for each crate to land in the index before the next resolves it.
 publish: $(addprefix publish-,$(CRATES))
 
-publish-%:
+$(addprefix publish-,$(CRATES)): publish-%:
 	cargo publish -p multiscan-$* --locked $(PUBLISH_FLAGS)
 
 clean:
