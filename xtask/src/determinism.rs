@@ -49,6 +49,7 @@ pub fn run(runs: u32) -> Result<()> {
                     .args([
                         "scan",
                         ".",
+                        "--no-store",
                         "--format",
                         format,
                         "--testkit-fixture",

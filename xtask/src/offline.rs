@@ -14,6 +14,7 @@ use crate::util;
 const SCAN_ARGS: &[&str] = &[
     "scan",
     ".",
+    "--no-store",
     "--offline",
     "--format",
     "json",

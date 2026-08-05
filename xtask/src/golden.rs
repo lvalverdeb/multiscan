@@ -27,7 +27,7 @@ pub fn run(bless: bool) -> Result<()> {
         for format in FORMATS {
             let output = Command::new(util::binary_path())
                 .current_dir(&scratch)
-                .args(["scan", ".", "--format", format])
+                .args(["scan", ".", "--no-store", "--format", format])
                 .args(*extra_args)
                 .env("TZ", "UTC")
                 .env("LC_ALL", "C")

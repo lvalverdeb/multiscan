@@ -20,6 +20,7 @@ multiscan-feeds.workspace = true
 multiscan-sca.workspace = true
 multiscan-secrets.workspace = true
 multiscan-iac.workspace = true
+multiscan-store.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true

@@ -29,6 +29,32 @@ fn usage(message: &str) -> Exit {
     Exit::Usage
 }
 
+/// Persist findings to `.multiscan/multiscan.db` under the scan root (STO-001).
+/// Best-effort: a store error never fails the scan (STO-003 keeps state
+/// optional), it degrades to a stderr warning.
+fn persist(root: &std::path::Path, findings: &[Finding], started_at: &str, quiet: bool) {
+    use multiscan_store::{SqliteStore, Store};
+    let db_path = root.join(".multiscan/multiscan.db");
+    let now = chrono::DateTime::parse_from_rfc3339(started_at)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let result =
+        SqliteStore::open(&db_path).and_then(|mut store| store.upsert_findings(findings, now));
+    match result {
+        Ok(stats) if !quiet => {
+            eprintln!(
+                "multiscan: store: {} new, {} updated, {} unchanged",
+                stats.new, stats.updated, stats.unchanged
+            );
+        }
+        Ok(_) => {}
+        Err(err) if !quiet => {
+            eprintln!("multiscan: warning: could not persist findings: {err}");
+        }
+        Err(_) => {}
+    }
+}
+
 /// The scan's wall-clock timestamp, RFC 3339. Honours `MULTISCAN_NOW` as an
 /// injected-clock override so golden and determinism tests can hold time
 /// constant (DET-004). It only ever reaches the human-format footer, never
@@ -354,6 +380,12 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         })
         .collect();
     sort_findings(&mut findings);
+
+    // Persist to the findings database unless stateless (STO-003). Store
+    // failures degrade to a warning — a scan must still produce results.
+    if !args.no_store {
+        persist(&args.path, &findings, &ctx.started_at, args.quiet);
+    }
 
     // Gate before display filtering: --min-severity is a display filter,
     // never a gate (spec 4.2).

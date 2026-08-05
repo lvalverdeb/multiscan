@@ -73,6 +73,7 @@ toml = "0.8"
 regex = "1"
 hcl-rs = "0.19"
 serde_yaml_ng = "0.10"
+rusqlite = { version = "0.37", features = ["bundled"] }
 semver = "1"
 pep440_rs = "0.7"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }

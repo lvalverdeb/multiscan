@@ -143,6 +143,10 @@ pub struct ScanArgs {
     /// Dev-only: make the testkit fixture end with a Partial outcome.
     #[arg(long, hide = true)]
     pub testkit_partial: bool,
+
+    /// Stateless scan: do not read or write the findings database (STO-003).
+    #[arg(long)]
+    pub no_store: bool,
 }
 
 /// Remote scan targets.
