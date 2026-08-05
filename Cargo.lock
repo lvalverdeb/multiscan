@@ -859,6 +859,15 @@ dependencies = [
 [[package]]
 name = "multiscan-bridge"
 version = "0.1.0"
+dependencies = [
+ "blake3",
+ "multiscan-core",
+ "multiscan-dedup",
+ "multiscan-report",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
 
 [[package]]
 name = "multiscan-cli"
@@ -868,6 +877,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
+ "multiscan-bridge",
  "multiscan-core",
  "multiscan-dedup",
  "multiscan-engine",

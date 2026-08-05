@@ -155,6 +155,33 @@ pub fn diff(baseline: &Path) -> Result<Exit> {
     Ok(Exit::Clean)
 }
 
+/// `multiscan import <file>` — ingest an external scanner report (SARIF in v1)
+/// and render it in the requested format (spec 7.6). Imported findings carry
+/// their producing tool in `sources[].engine_id` (BRG-001).
+pub fn import(file: &Path, format: multiscan_report::Format) -> Result<Exit> {
+    let bytes = match std::fs::read(file) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            eprintln!("multiscan: error: reading {}: {e}", file.display());
+            return Ok(Exit::Usage);
+        }
+    };
+    let mut findings = match multiscan_bridge::import(&bytes) {
+        Ok(findings) => findings,
+        Err(e) => {
+            eprintln!("multiscan: error: import failed: {e}");
+            return Ok(Exit::Usage);
+        }
+    };
+    multiscan_report::sort_findings(&mut findings);
+    let footer = multiscan_report::Footer {
+        scanned_at: crate::scan::scan_timestamp(),
+        feed_snapshot_id: None,
+    };
+    print!("{}", multiscan_report::render(format, &findings, &footer));
+    Ok(Exit::Clean)
+}
+
 fn parse_expiry(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
         return Some(dt.with_timezone(&chrono::Utc));

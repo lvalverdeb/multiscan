@@ -33,7 +33,19 @@ fn run(parsed: Cli) -> anyhow::Result<Exit> {
             clap_complete::generate(shell, &mut command, "multiscan", &mut std::io::stdout());
             Ok(Exit::Clean)
         }
-        Command::Import { .. } => not_yet("import", "T-305"),
+        Command::Import { file, format } => {
+            let fmt = match format.as_deref() {
+                None => multiscan_report::Format::Table,
+                Some(name) => match multiscan_report::Format::parse(name) {
+                    Some(f) => f,
+                    None => {
+                        eprintln!("multiscan: error: unknown format `{name}`");
+                        return Ok(Exit::Usage);
+                    }
+                },
+            };
+            history::import(&file, fmt)
+        }
         Command::Report => not_yet("report", "T-301"),
         Command::Explain { .. } => not_yet("explain", "T-603"),
         Command::Diff { baseline } => history::diff(&baseline),

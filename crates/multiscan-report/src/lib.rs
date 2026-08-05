@@ -236,29 +236,44 @@ fn markdown(findings: &[Finding], footer: &Footer) -> String {
     out
 }
 
-/// Minimal SARIF 2.1.0 (upgraded to full round-trip fidelity in T-303).
-/// `ruleId` is the canonical policy/advisory id and `partialFingerprints`
-/// carries `finding_id` (OUT-001).
+/// SARIF 2.1.0 level for a severity. Coarse by design — SARIF has three
+/// levels — so exact severity is preserved in the properties bag instead.
+fn sarif_level(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Informational => "note",
+        Severity::Low | Severity::Medium => "warning",
+        Severity::High | Severity::Critical => "error",
+    }
+}
+
+/// The property-bag key under which the complete Finding is embedded. External
+/// tools read the native SARIF fields; our own importer reads this for a
+/// lossless round-trip (FR-013).
+pub const SARIF_FINDING_PROPERTY: &str = "multiscan/finding";
+
+/// SARIF 2.1.0. Native fields serve GitHub/GitLab (OUT-001: `ruleId` is the
+/// canonical id, `partialFingerprints` carries `finding_id`); a per-result
+/// properties bag embeds the full Finding so a re-import is lossless (FR-013).
 fn sarif(findings: &[Finding]) -> String {
     let results: Vec<serde_json::Value> = findings
         .iter()
         .map(|f| {
+            let region = match f.location.line {
+                Some(line) => serde_json::json!({ "startLine": line }),
+                None => serde_json::json!({ "startLine": 1 }),
+            };
             serde_json::json!({
                 "ruleId": rule_id(f),
-                "level": match f.severity {
-                    Severity::Informational => "note",
-                    Severity::Low | Severity::Medium => "warning",
-                    Severity::High | Severity::Critical => "error",
-                },
+                "level": sarif_level(f.severity),
                 "message": { "text": f.title },
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": { "uri": f.location.path },
-                        "region": f.location.line.map(|l| serde_json::json!({"startLine": l}))
-                            .unwrap_or(serde_json::json!({"startLine": 1})),
+                        "region": region,
                     }
                 }],
-                "partialFingerprints": { "multiscan/findingId": f.finding_id },
+                "partialFingerprints": { "multiscan/findingId": f.finding_id.0 },
+                "properties": { SARIF_FINDING_PROPERTY: f },
             })
         })
         .collect();

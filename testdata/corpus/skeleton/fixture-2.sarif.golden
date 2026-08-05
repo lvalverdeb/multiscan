@@ -23,6 +23,51 @@
           "partialFingerprints": {
             "multiscan/findingId": "2cf8b3c436612422c76722fe7e0ec7d4711ca306a6cc9084ae63126cc7a7cf87"
           },
+          "properties": {
+            "multiscan/finding": {
+              "asset": {
+                "identifier": "fixtures/resource-001.tf",
+                "kind": "file"
+              },
+              "confidence": "heuristic",
+              "finding_id": "2cf8b3c436612422c76722fe7e0ec7d4711ca306a6cc9084ae63126cc7a7cf87",
+              "identity": {
+                "finding_class": "iac_misconfiguration",
+                "path": "fixtures/resource-001.tf",
+                "policy_id": "TESTKIT-001",
+                "resource_address": "test_resource.r001"
+              },
+              "location": {
+                "line": 1,
+                "path": "fixtures/resource-001.tf"
+              },
+              "risk_score": 20.212499999999995,
+              "score_explanation": {
+                "defaults_applied": [
+                  "asset_criticality",
+                  "exposure"
+                ],
+                "factors": {
+                  "asset_criticality": 1.0,
+                  "confidence": 0.7,
+                  "exploitability": 0.55,
+                  "exposure": 0.7,
+                  "severity_base": 0.75
+                },
+                "formula_version": "1",
+                "raw_product": 0.20212499999999994
+              },
+              "severity": "high",
+              "sources": [
+                {
+                  "engine_id": "testkit.fixture",
+                  "rule_id": "TESTKIT-001"
+                }
+              ],
+              "status": "open",
+              "title": "Fixture finding 001"
+            }
+          },
           "ruleId": "TESTKIT-001"
         },
         {
@@ -44,6 +89,51 @@
           },
           "partialFingerprints": {
             "multiscan/findingId": "0dd9737669998e5ab32f4bfedc6eb83c89fd672b9c622f367555fddde91a0c28"
+          },
+          "properties": {
+            "multiscan/finding": {
+              "asset": {
+                "identifier": "fixtures/resource-000.tf",
+                "kind": "file"
+              },
+              "confidence": "heuristic",
+              "finding_id": "0dd9737669998e5ab32f4bfedc6eb83c89fd672b9c622f367555fddde91a0c28",
+              "identity": {
+                "finding_class": "iac_misconfiguration",
+                "path": "fixtures/resource-000.tf",
+                "policy_id": "TESTKIT-000",
+                "resource_address": "test_resource.r000"
+              },
+              "location": {
+                "line": 1,
+                "path": "fixtures/resource-000.tf"
+              },
+              "risk_score": 13.474999999999998,
+              "score_explanation": {
+                "defaults_applied": [
+                  "asset_criticality",
+                  "exposure"
+                ],
+                "factors": {
+                  "asset_criticality": 1.0,
+                  "confidence": 0.7,
+                  "exploitability": 0.55,
+                  "exposure": 0.7,
+                  "severity_base": 0.5
+                },
+                "formula_version": "1",
+                "raw_product": 0.13474999999999998
+              },
+              "severity": "medium",
+              "sources": [
+                {
+                  "engine_id": "testkit.fixture",
+                  "rule_id": "TESTKIT-000"
+                }
+              ],
+              "status": "open",
+              "title": "Fixture finding 000"
+            }
           },
           "ruleId": "TESTKIT-000"
         }

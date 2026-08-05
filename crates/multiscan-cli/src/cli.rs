@@ -23,6 +23,9 @@ pub enum Command {
     Import {
         /// Report file to import (SARIF, Trivy JSON, ...)
         file: PathBuf,
+        /// Output format: table | json | jsonl | sarif | sbom | markdown
+        #[arg(long)]
+        format: Option<String>,
     },
     /// Re-render stored Findings in another format
     Report,

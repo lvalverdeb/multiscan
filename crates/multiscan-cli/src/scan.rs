@@ -135,7 +135,7 @@ fn persist(root: &std::path::Path, findings: &[Finding], started_at: &str, quiet
 /// injected-clock override so golden and determinism tests can hold time
 /// constant (DET-004). It only ever reaches the human-format footer, never
 /// machine output, so it does not violate DET-006.
-fn scan_timestamp() -> String {
+pub fn scan_timestamp() -> String {
     match std::env::var("MULTISCAN_NOW") {
         Ok(value) if !value.is_empty() => value,
         _ => chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
