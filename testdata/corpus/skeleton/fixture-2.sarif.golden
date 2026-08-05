@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "fixtures/resource-001.tf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Fixture finding 001"
+          },
+          "partialFingerprints": {
+            "multiscan/findingId": "2cf8b3c436612422c76722fe7e0ec7d4711ca306a6cc9084ae63126cc7a7cf87"
+          },
+          "ruleId": "TESTKIT-001"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "fixtures/resource-000.tf"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Fixture finding 000"
+          },
+          "partialFingerprints": {
+            "multiscan/findingId": "0dd9737669998e5ab32f4bfedc6eb83c89fd672b9c622f367555fddde91a0c28"
+          },
+          "ruleId": "TESTKIT-000"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://example.invalid/multiscan",
+          "name": "multiscan",
+          "rules": []
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

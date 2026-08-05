@@ -4,8 +4,7 @@
 #![allow(clippy::all)]
 
 /// blake3 digest of the schema inputs this module was generated from.
-pub const SCHEMA_DIGEST: &str =
-    "blake3:7d36a961e9ab258dd1749a9d90eb8bb3a4fdc16c7015be2879f0333749248343";
+pub const SCHEMA_DIGEST: &str = "blake3:7d36a961e9ab258dd1749a9d90eb8bb3a4fdc16c7015be2879f0333749248343";
 
 /// Error types.
 pub mod error {
@@ -13,12 +12,18 @@ pub mod error {
     pub struct ConversionError(::std::borrow::Cow<'static, str>);
     impl ::std::error::Error for ConversionError {}
     impl ::std::fmt::Display for ConversionError {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+        fn fmt(
+            &self,
+            f: &mut ::std::fmt::Formatter<'_>,
+        ) -> Result<(), ::std::fmt::Error> {
             ::std::fmt::Display::fmt(&self.0, f)
         }
     }
     impl ::std::fmt::Debug for ConversionError {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+        fn fmt(
+            &self,
+            f: &mut ::std::fmt::Formatter<'_>,
+        ) -> Result<(), ::std::fmt::Error> {
             ::std::fmt::Debug::fmt(&self.0, f)
         }
     }
@@ -95,7 +100,7 @@ pub struct Asset {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum AssetKind {
     #[serde(rename = "repo")]
@@ -122,7 +127,9 @@ impl ::std::fmt::Display for AssetKind {
 }
 impl ::std::str::FromStr for AssetKind {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "repo" => Ok(Self::Repo),
             "file" => Ok(Self::File),
@@ -135,7 +142,9 @@ impl ::std::str::FromStr for AssetKind {
 }
 impl ::std::convert::TryFrom<&str> for AssetKind {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -274,7 +283,7 @@ pub struct AuthorizedScope {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum AuthorizedScopePermittedMethodsItem {
     #[serde(rename = "GET")]
@@ -298,7 +307,9 @@ impl ::std::fmt::Display for AuthorizedScopePermittedMethodsItem {
 }
 impl ::std::str::FromStr for AuthorizedScopePermittedMethodsItem {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "GET" => Ok(Self::Get),
             "HEAD" => Ok(Self::Head),
@@ -310,11 +321,14 @@ impl ::std::str::FromStr for AuthorizedScopePermittedMethodsItem {
 }
 impl ::std::convert::TryFrom<&str> for AuthorizedScopePermittedMethodsItem {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
-impl ::std::convert::TryFrom<&::std::string::String> for AuthorizedScopePermittedMethodsItem {
+impl ::std::convert::TryFrom<&::std::string::String>
+for AuthorizedScopePermittedMethodsItem {
     type Error = self::error::ConversionError;
     fn try_from(
         value: &::std::string::String,
@@ -322,7 +336,8 @@ impl ::std::convert::TryFrom<&::std::string::String> for AuthorizedScopePermitte
         value.parse()
     }
 }
-impl ::std::convert::TryFrom<::std::string::String> for AuthorizedScopePermittedMethodsItem {
+impl ::std::convert::TryFrom<::std::string::String>
+for AuthorizedScopePermittedMethodsItem {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -357,7 +372,7 @@ impl ::std::convert::TryFrom<::std::string::String> for AuthorizedScopePermitted
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum Confidence {
     #[serde(rename = "unconfirmed")]
@@ -381,7 +396,9 @@ impl ::std::fmt::Display for Confidence {
 }
 impl ::std::str::FromStr for Confidence {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "unconfirmed" => Ok(Self::Unconfirmed),
             "heuristic" => Ok(Self::Heuristic),
@@ -393,7 +410,9 @@ impl ::std::str::FromStr for Confidence {
 }
 impl ::std::convert::TryFrom<&str> for Confidence {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -515,7 +534,7 @@ impl ::std::default::Default for Config {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum Criticality {
     #[serde(rename = "low")]
@@ -539,7 +558,9 @@ impl ::std::fmt::Display for Criticality {
 }
 impl ::std::str::FromStr for Criticality {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "low" => Ok(Self::Low),
             "medium" => Ok(Self::Medium),
@@ -551,7 +572,9 @@ impl ::std::str::FromStr for Criticality {
 }
 impl ::std::convert::TryFrom<&str> for Criticality {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -598,7 +621,7 @@ impl ::std::convert::TryFrom<::std::string::String> for Criticality {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum DataClassification {
     #[serde(rename = "public")]
@@ -622,7 +645,9 @@ impl ::std::fmt::Display for DataClassification {
 }
 impl ::std::str::FromStr for DataClassification {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "public" => Ok(Self::Public),
             "internal" => Ok(Self::Internal),
@@ -634,7 +659,9 @@ impl ::std::str::FromStr for DataClassification {
 }
 impl ::std::convert::TryFrom<&str> for DataClassification {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -1030,7 +1057,7 @@ pub struct Finding {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum FindingClass {
     #[serde(rename = "vulnerable_dependency")]
@@ -1060,7 +1087,9 @@ impl ::std::fmt::Display for FindingClass {
 }
 impl ::std::str::FromStr for FindingClass {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "vulnerable_dependency" => Ok(Self::VulnerableDependency),
             "container_vulnerability" => Ok(Self::ContainerVulnerability),
@@ -1074,7 +1103,9 @@ impl ::std::str::FromStr for FindingClass {
 }
 impl ::std::convert::TryFrom<&str> for FindingClass {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -1106,7 +1137,15 @@ impl ::std::convert::TryFrom<::std::string::String> for FindingClass {
 /// ```
 /// </details>
 #[derive(
-    ::serde::Deserialize, ::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd,
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
 )]
 #[serde(transparent)]
 pub struct FindingId(pub ::std::string::String);
@@ -1163,7 +1202,7 @@ impl ::std::fmt::Display for FindingId {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum FindingStatus {
     #[serde(rename = "open")]
@@ -1184,7 +1223,9 @@ impl ::std::fmt::Display for FindingStatus {
 }
 impl ::std::str::FromStr for FindingStatus {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "open" => Ok(Self::Open),
             "fixed" => Ok(Self::Fixed),
@@ -1195,7 +1236,9 @@ impl ::std::str::FromStr for FindingStatus {
 }
 impl ::std::convert::TryFrom<&str> for FindingStatus {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -1559,7 +1602,7 @@ pub enum IdentityKey {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum Layer {
     #[serde(rename = "sca")]
@@ -1586,7 +1629,9 @@ impl ::std::fmt::Display for Layer {
 }
 impl ::std::str::FromStr for Layer {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "sca" => Ok(Self::Sca),
             "secrets" => Ok(Self::Secrets),
@@ -1599,7 +1644,9 @@ impl ::std::str::FromStr for Layer {
 }
 impl ::std::convert::TryFrom<&str> for Layer {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -1707,7 +1754,7 @@ impl ::std::convert::From<::serde_json::Value> for MultiScan {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum NetworkImpact {
     #[serde(rename = "read_only")]
@@ -1725,7 +1772,9 @@ impl ::std::fmt::Display for NetworkImpact {
 }
 impl ::std::str::FromStr for NetworkImpact {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "read_only" => Ok(Self::ReadOnly),
             "active_safe" => Ok(Self::ActiveSafe),
@@ -1735,7 +1784,9 @@ impl ::std::str::FromStr for NetworkImpact {
 }
 impl ::std::convert::TryFrom<&str> for NetworkImpact {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -1781,7 +1832,7 @@ impl ::std::convert::TryFrom<::std::string::String> for NetworkImpact {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum Profile {
     #[serde(rename = "quick")]
@@ -1802,7 +1853,9 @@ impl ::std::fmt::Display for Profile {
 }
 impl ::std::str::FromStr for Profile {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "quick" => Ok(Self::Quick),
             "standard" => Ok(Self::Standard),
@@ -1813,7 +1866,9 @@ impl ::std::str::FromStr for Profile {
 }
 impl ::std::convert::TryFrom<&str> for Profile {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }
@@ -2335,7 +2390,7 @@ pub struct ScoreFactors {
     Hash,
     Ord,
     PartialEq,
-    PartialOrd,
+    PartialOrd
 )]
 pub enum Severity {
     #[serde(rename = "informational")]
@@ -2362,7 +2417,9 @@ impl ::std::fmt::Display for Severity {
 }
 impl ::std::str::FromStr for Severity {
     type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "informational" => Ok(Self::Informational),
             "low" => Ok(Self::Low),
@@ -2375,7 +2432,9 @@ impl ::std::str::FromStr for Severity {
 }
 impl ::std::convert::TryFrom<&str> for Severity {
     type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
 }

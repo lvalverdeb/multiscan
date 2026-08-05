@@ -6,7 +6,10 @@
 
 // Generated code documents itself from schema descriptions; helper items
 // (error module, conversions) are exempt from the docs requirement.
+// rustfmt::skip keeps `cargo fmt` from rewriting prettyplease's output,
+// which would break the `gen --check` byte-compare drift gate.
 #[allow(missing_docs)]
+#[rustfmt::skip]
 pub mod generated;
 
 pub use generated::*;

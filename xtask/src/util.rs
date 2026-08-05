@@ -12,6 +12,26 @@ pub fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Path of the debug CLI binary the harnesses drive.
+pub fn binary_path() -> PathBuf {
+    workspace_root().join("target/debug/multiscan")
+}
+
+/// Build the CLI binary so harnesses always test current code.
+pub fn ensure_binary() -> Result<()> {
+    run("cargo", &["build", "-p", "multiscan-cli"])
+}
+
+/// A fresh empty scratch directory under target/ (recreated each call).
+pub fn scratch_dir(name: &str) -> Result<PathBuf> {
+    let dir = workspace_root().join("target/xtask-scratch").join(name);
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).with_context(|| format!("clearing {}", dir.display()))?;
+    }
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    Ok(dir)
+}
+
 /// Run a command from the workspace root, inheriting stdio; fail on non-zero exit.
 pub fn run(program: &str, args: &[&str]) -> Result<()> {
     eprintln!("xtask: $ {program} {}", args.join(" "));

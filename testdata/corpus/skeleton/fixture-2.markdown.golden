@@ -1,0 +1,8 @@
+## MultiScan findings
+
+| Severity | ID | Score | Rule | Location | Fix |
+|---|---|---|---|---|---|
+| HIGH | `2cf8b3c43661` | 20.2 | TESTKIT-001 | `fixtures/resource-001.tf:1` | - |
+| MEDIUM | `0dd973766999` | 13.5 | TESTKIT-000 | `fixtures/resource-000.tf:1` | - |
+
+2 finding(s)
