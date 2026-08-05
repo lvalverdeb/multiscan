@@ -20,7 +20,7 @@ pub use template::{Template, TemplateError};
 /// The bundled probe template pack, embedded so the probe layer needs no
 /// network access to obtain its rules (content-addressed provenance via the
 /// digest below).
-const BUILTIN_TEMPLATES: &str = include_str!("../../../../rules/probe/builtin.yaml");
+const BUILTIN_TEMPLATES: &str = include_str!("../rules/builtin.yaml");
 
 /// Parse the bundled template pack.
 pub fn builtin_templates() -> Result<Vec<Template>, TemplateError> {

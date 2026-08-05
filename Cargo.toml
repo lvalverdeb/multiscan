@@ -45,20 +45,20 @@ license = "MIT"
 
 [workspace.dependencies]
 # Internal crates — path deps, single declaration point (no per-crate version drift).
-multiscan-core = { path = "crates/multiscan-core" }
-multiscan-engine = { path = "crates/multiscan-engine" }
-multiscan-scope = { path = "crates/multiscan-scope" }
-multiscan-feeds = { path = "crates/multiscan-feeds" }
-multiscan-dedup = { path = "crates/multiscan-dedup" }
-multiscan-risk = { path = "crates/multiscan-risk" }
-multiscan-store = { path = "crates/multiscan-store" }
-multiscan-report = { path = "crates/multiscan-report" }
-multiscan-sca = { path = "crates/engines/multiscan-sca" }
-multiscan-secrets = { path = "crates/engines/multiscan-secrets" }
-multiscan-iac = { path = "crates/engines/multiscan-iac" }
-multiscan-probe = { path = "crates/engines/multiscan-probe" }
-multiscan-sast = { path = "crates/engines/multiscan-sast" }
-multiscan-bridge = { path = "crates/engines/multiscan-bridge" }
+multiscan-core = { path = "crates/multiscan-core", version = "0.1.0" }
+multiscan-engine = { path = "crates/multiscan-engine", version = "0.1.0" }
+multiscan-scope = { path = "crates/multiscan-scope", version = "0.1.0" }
+multiscan-feeds = { path = "crates/multiscan-feeds", version = "0.1.0" }
+multiscan-dedup = { path = "crates/multiscan-dedup", version = "0.1.0" }
+multiscan-risk = { path = "crates/multiscan-risk", version = "0.1.0" }
+multiscan-store = { path = "crates/multiscan-store", version = "0.1.0" }
+multiscan-report = { path = "crates/multiscan-report", version = "0.1.0" }
+multiscan-sca = { path = "crates/engines/multiscan-sca", version = "0.1.0" }
+multiscan-secrets = { path = "crates/engines/multiscan-secrets", version = "0.1.0" }
+multiscan-iac = { path = "crates/engines/multiscan-iac", version = "0.1.0" }
+multiscan-probe = { path = "crates/engines/multiscan-probe", version = "0.1.0" }
+multiscan-sast = { path = "crates/engines/multiscan-sast", version = "0.1.0" }
+multiscan-bridge = { path = "crates/engines/multiscan-bridge", version = "0.1.0" }
 
 # External
 serde = { version = "1", features = ["derive"] }

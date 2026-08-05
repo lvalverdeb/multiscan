@@ -25,7 +25,7 @@ pub use resource::{Resource, Value};
 
 /// The bundled CIS-mapped policy pack, content-addressed for provenance
 /// (FD-006). Embedded so the iac layer needs zero network access (FD-007).
-const CIS_PACK: &str = include_str!("../../../../rules/iac/cis-core.json");
+const CIS_PACK: &str = include_str!("../rules/cis-core.json");
 
 const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_FILES_VISITED: usize = 1_000_000;
