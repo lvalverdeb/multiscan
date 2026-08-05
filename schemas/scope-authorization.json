@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MultiScan scope authorization",
+  "definitions": {
+    "AuthorizedScope": {
+      "description": "The scope block of a ScopeAuthorization (spec 9.1). exclude always beats include (SEC-002); wildcards must not span a public suffix (SEC-003).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["include", "permitted_methods", "valid_from", "valid_until", "authorized_by", "attestation", "signature"],
+      "properties": {
+        "include": { "description": "Hostname patterns in scope.", "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "exclude": { "description": "Hostname patterns explicitly out of scope; beats include (SEC-002).", "type": "array", "items": { "type": "string" } },
+        "permitted_methods": { "description": "HTTP methods the authorization permits (PRB-003).", "type": "array", "items": { "type": "string", "enum": ["GET", "HEAD", "OPTIONS", "POST"] }, "minItems": 1 },
+        "valid_from": { "description": "Start of validity window, RFC 3339 string; parsed and enforced by multiscan-scope (SEC-001). Kept as a string so multiscan-core stays chrono-free.", "type": "string" },
+        "valid_until": { "description": "End of validity window, RFC 3339 string; parsed and enforced by multiscan-scope (SEC-001).", "type": "string" },
+        "authorized_by": { "description": "Person or role granting the authorization.", "type": "string" },
+        "attestation": { "description": "Statement that written authorization is on file; must be non-empty (A-1, enforced by multiscan-scope).", "type": "string" },
+        "signature": { "description": "ed25519 signature over the authorization content.", "type": "string" }
+      }
+    },
+    "ScopeAuthorization": {
+      "description": "Signed record permitting probing of named remote targets (spec 9.1). No flag, env var, or config key may bypass it (SEC-009).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorization_id", "scope"],
+      "properties": {
+        "authorization_id": { "description": "Unique id of this authorization.", "type": "string" },
+        "scope": { "description": "The authorized scope and validity window.", "$ref": "#/definitions/AuthorizedScope" }
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MultiScan engine manifest",
+  "definitions": {
+    "RuleSetRef": {
+      "description": "Reference to a versioned, content-addressed rule corpus (spec 2, FD-006).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest"],
+      "properties": {
+        "id": { "description": "Rule pack id, e.g. cis-bundle.", "type": "string" },
+        "version": { "description": "Rule pack version.", "type": "string" },
+        "digest": { "description": "Content digest of the pack.", "type": "string" }
+      }
+    },
+    "EngineManifest": {
+      "description": "Static declaration of an Engine's identity and capabilities (spec 6.1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "finding_classes", "layers", "network_impact", "requires_authorization", "severity_map"],
+      "properties": {
+        "id": { "description": "Engine id, e.g. multiscan.sca.", "type": "string" },
+        "version": { "description": "Engine version.", "type": "string" },
+        "finding_classes": { "description": "Finding classes this engine can emit.", "type": "array", "items": { "$ref": "#/definitions/FindingClass" } },
+        "layers": { "description": "Layers this engine participates in.", "type": "array", "items": { "$ref": "#/definitions/Layer" } },
+        "network_impact": { "description": "ReadOnly or ActiveSafe; no destructive variant exists (ENG-001).", "$ref": "#/definitions/NetworkImpact" },
+        "requires_authorization": { "description": "Whether scanning requires a ScopeAuthorization (spec 9).", "type": "boolean" },
+        "rule_set": { "description": "Rule corpus the engine executes, if any.", "$ref": "#/definitions/RuleSetRef" },
+        "severity_map": { "description": "Explicit mapping from engine-native rule severity labels to Severity. Inferred or passthrough severity is forbidden (ENG-004).", "type": "object", "additionalProperties": { "$ref": "#/definitions/Severity" } }
+      }
+    }
+  }
+}

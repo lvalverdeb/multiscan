@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MultiScan configuration file",
+  "definitions": {
+    "Criticality": {
+      "description": "Asset criticality context for risk scoring (spec 8, factor A).",
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "DataClassification": {
+      "description": "Data classification context; sensitive/regulated adds +0.10 to factor A, clamped at 1.30 (spec 8).",
+      "type": "string",
+      "enum": ["public", "internal", "sensitive", "regulated"]
+    },
+    "FailOn": {
+      "description": "Gate threshold: a risk score number or a severity name (spec 4.2).",
+      "oneOf": [
+        { "description": "Minimum risk score that fails the gate.", "type": "number" },
+        { "description": "Minimum severity that fails the gate.", "$ref": "#/definitions/Severity" }
+      ]
+    },
+    "ScanConfig": {
+      "description": "[scan] section (spec 4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layers": { "description": "Layers to run; default auto-detect.", "type": "array", "items": { "$ref": "#/definitions/Layer" } },
+        "profile": { "description": "Scan profile; default standard.", "$ref": "#/definitions/Profile" },
+        "exclude": { "description": "Glob patterns to exclude. Committable, machine-independent (CLI-007).", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "GateConfig": {
+      "description": "[gate] section (spec 4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fail_on": { "description": "Exit 1 if any Finding meets this threshold.", "$ref": "#/definitions/FailOn" },
+        "baseline": { "description": "Relative path to a baseline Finding set for delta gating.", "type": "string" },
+        "ignore_unfixable": { "description": "Gate only on Findings with a fix available.", "type": "boolean" }
+      }
+    },
+    "RiskConfig": {
+      "description": "[risk] section: scoring context (spec 4.5, 8).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "asset_criticality": { "description": "Factor A input.", "$ref": "#/definitions/Criticality" },
+        "data_classification": { "description": "Factor A modifier input.", "$ref": "#/definitions/DataClassification" }
+      }
+    },
+    "FeedsConfig": {
+      "description": "[feeds] section (spec 4.5, 10).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_age": { "description": "Maximum acceptable feed age, e.g. 7d (FD-004).", "type": "string" },
+        "offline": { "description": "Never touch the network (FR-011).", "type": "boolean" }
+      }
+    },
+    "RulesConfig": {
+      "description": "[rules] section: pinned rule/data sources (spec 4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sca_db": { "description": "Pinned advisory snapshot, e.g. osv@2026-08-05.", "type": "string" },
+        "iac_pack": { "description": "Pinned IaC policy pack, e.g. cis-bundle@1.9.0.", "type": "string" },
+        "secrets_pack": { "description": "Pinned secrets rule pack.", "type": "string" }
+      }
+    },
+    "SuppressEntry": {
+      "description": "One [[suppress]] entry. justification, approver, and expires are all mandatory — permanent suppression does not exist (CLI-006).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "justification", "approver", "expires"],
+      "properties": {
+        "finding_id": { "description": "Finding to suppress (prefix allowed at CLI, full id here).", "$ref": "#/definitions/FindingId" },
+        "justification": { "description": "Why this Finding is suppressed.", "type": "string" },
+        "approver": { "description": "Who approved the suppression.", "type": "string" },
+        "expires": { "description": "Expiry date, RFC 3339 date; after this the Finding gates normally (FR-014).", "type": "string" }
+      }
+    },
+    "Config": {
+      "description": "multiscan.toml — committable, diff-friendly, no machine-specific values (CLI-007). Flags override file values; file values override defaults.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scan": { "description": "Scan selection and exclusions.", "$ref": "#/definitions/ScanConfig" },
+        "gate": { "description": "CI gate policy.", "$ref": "#/definitions/GateConfig" },
+        "risk": { "description": "Risk scoring context.", "$ref": "#/definitions/RiskConfig" },
+        "feeds": { "description": "Feed freshness and offline policy.", "$ref": "#/definitions/FeedsConfig" },
+        "rules": { "description": "Pinned rule and data sources.", "$ref": "#/definitions/RulesConfig" },
+        "suppress": { "description": "Time-bounded, justified suppressions (CLI-006).", "type": "array", "items": { "$ref": "#/definitions/SuppressEntry" } }
+      }
+    }
+  }
+}

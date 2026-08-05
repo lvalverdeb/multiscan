@@ -1,0 +1,53 @@
+{
+  "finding_id": "a3f9c1e07b2d4e6f8a0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a",
+  "identity": {
+    "finding_class": "vulnerable_dependency",
+    "purl": "pkg:npm/lodash@4.17.20",
+    "advisory_id": "GHSA-35jh-r3h4-6jhm",
+    "manifest_path": "package-lock.json"
+  },
+  "title": "lodash 4.17.20 vulnerable to command injection",
+  "description": "Prototype pollution reachable via template.",
+  "severity": "high",
+  "confidence": "corroborated",
+  "status": "open",
+  "risk_score": 82.4,
+  "score_explanation": {
+    "formula_version": "1",
+    "feed_snapshot_id": "osv-2026-08-05",
+    "factors": {
+      "severity_base": 0.8,
+      "exposure": 1.0,
+      "exploitability": 0.9,
+      "confidence": 0.85,
+      "asset_criticality": 1.2
+    },
+    "raw_product": 0.7344,
+    "defaults_applied": ["exposure"]
+  },
+  "asset": {
+    "kind": "package",
+    "identifier": "pkg:npm/lodash@4.17.20"
+  },
+  "location": {
+    "path": "package-lock.json",
+    "line": 4211
+  },
+  "evidence": [
+    {
+      "kind": "lockfile_entry",
+      "summary": "lodash@4.17.20 required via express > body-parser",
+      "dependency_path": ["pkg:npm/express@4.18.0", "pkg:npm/lodash@4.17.20"]
+    }
+  ],
+  "sources": [
+    { "engine_id": "multiscan.sca", "rule_id": "GHSA-35jh-r3h4-6jhm" },
+    { "engine_id": "external:trivy", "rule_id": "CVE-2021-23337" }
+  ],
+  "remediation": {
+    "fix_available": true,
+    "fixed_version": "4.17.21",
+    "summary": "Upgrade lodash to 4.17.21."
+  },
+  "cwe": ["CWE-77"]
+}

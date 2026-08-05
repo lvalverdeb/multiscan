@@ -4,6 +4,7 @@
 //! shipped binary, and exempt from the unwrap/expect/panic bans (CLAUDE.md).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod gen;
 mod purity;
 mod util;
 
@@ -52,7 +53,7 @@ enum Cmd {
 
 fn main() -> Result<()> {
     match Cli::parse().cmd {
-        Cmd::Gen { check: _check } => stub("gen", "T-101"),
+        Cmd::Gen { check } => gen::run(check),
         Cmd::Golden { bless: _bless } => stub("golden", "T-106"),
         Cmd::Determinism { runs: _runs } => stub("determinism", "T-106"),
         Cmd::Safety => stub("safety", "T-501"),

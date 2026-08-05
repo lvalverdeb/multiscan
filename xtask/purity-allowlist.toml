@@ -7,8 +7,23 @@
 # Workspace-internal deps are not listed; pure crates may depend only on other
 # pure crates (enforced separately).
 
+# serde + serde_json for the generated types (R-4). The rest is their
+# transitive closure: derive machinery (build-time proc-macros) and the
+# int/float/byte-search formatting primitives. None perform I/O.
 [multiscan-core]
-allow = []
+allow = [
+    "serde",
+    "serde_core",
+    "serde_derive",
+    "serde_json",
+    "itoa",
+    "memchr",
+    "zmij",
+    "proc-macro2",
+    "quote",
+    "syn",
+    "unicode-ident",
+]
 
 [multiscan-dedup]
 allow = []

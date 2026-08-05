@@ -1,0 +1,204 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MultiScan Finding model",
+  "definitions": {
+    "Asset": {
+      "description": "Discrete scannable entity a Finding is attached to (spec 2).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "identifier"],
+      "properties": {
+        "kind": { "description": "What kind of entity this is.", "$ref": "#/definitions/AssetKind" },
+        "identifier": { "description": "Stable identifier: root-relative POSIX path, image digest, purl, or normalized origin (DET-005).", "type": "string" }
+      }
+    },
+    "Location": {
+      "description": "Where the weakness was observed. Line numbers are display-only and never enter identity (spec 7.7.3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "description": "Root-relative POSIX path (DET-005).", "type": "string" },
+        "line": { "description": "1-based line number, display-only.", "type": "integer" }
+      }
+    },
+    "Evidence": {
+      "description": "Non-destructive proof attached to a Finding (spec 2). Never contains secret values (SEC-101).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "summary"],
+      "properties": {
+        "kind": { "description": "Evidence kind, e.g. lockfile_entry, http_exchange, matched_resource.", "type": "string" },
+        "summary": { "description": "Human-readable one-line summary, redaction already applied.", "type": "string" },
+        "detail": { "description": "Structured, redacted evidence payload.", "type": "object" },
+        "dependency_path": { "description": "For transitive dependencies: purl chain from a direct dependency to the vulnerable one (SCA-003).", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Source": {
+      "description": "One engine or bridge that reported this Finding (BRG-001).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine_id"],
+      "properties": {
+        "engine_id": { "description": "Reporting engine, e.g. multiscan.sca, or bridge tool id.", "type": "string" },
+        "rule_id": { "description": "Rule/policy/advisory id within that engine.", "type": "string" }
+      }
+    },
+    "Remediation": {
+      "description": "How to fix the Finding (SCA-004).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fix_available"],
+      "properties": {
+        "fix_available": { "description": "Whether a fix exists within the current constraint.", "type": "boolean" },
+        "fixed_version": { "description": "Lowest non-vulnerable version satisfying the existing constraint (SCA-004).", "type": "string" },
+        "summary": { "description": "Human-readable remediation guidance.", "type": "string" }
+      }
+    },
+    "ScoreFactors": {
+      "description": "The five factors of the risk formula (spec 8).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity_base", "exposure", "exploitability", "confidence", "asset_criticality"],
+      "properties": {
+        "severity_base": { "description": "S: 0.05-1.00.", "type": "number" },
+        "exposure": { "description": "E: 0.30-1.00.", "type": "number" },
+        "exploitability": { "description": "X: 0.20-1.00.", "type": "number" },
+        "confidence": { "description": "C: 0.50-1.00.", "type": "number" },
+        "asset_criticality": { "description": "A: 0.50-1.30.", "type": "number" }
+      }
+    },
+    "ScoreExplanation": {
+      "description": "Full provenance of a RiskScore (RSK-002, RSK-003, RSK-005).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formula_version", "factors", "raw_product", "defaults_applied"],
+      "properties": {
+        "formula_version": { "description": "Version of the scoring formula (RSK-004).", "type": "string" },
+        "feed_snapshot_id": { "description": "FeedSnapshot the enrichment came from; absent when scoring ran without feeds (RSK-003).", "type": "string" },
+        "factors": { "description": "The five factor values used.", "$ref": "#/definitions/ScoreFactors" },
+        "raw_product": { "description": "S*E*X*C*A before scaling/clamping.", "type": "number" },
+        "defaults_applied": { "description": "Names of factors that fell back to documented defaults (RSK-002).", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "IdentityKey": {
+      "description": "Class-discriminated identity tuple; blake3 of its canonical form is the finding_id (spec 7.7.2). No line numbers, timestamps, engine versions, or secret values (spec 7.7.3).",
+      "oneOf": [
+        {
+          "description": "Identity of a vulnerable dependency from a lockfile or manifest.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finding_class", "purl", "advisory_id", "manifest_path"],
+          "properties": {
+            "finding_class": { "description": "Discriminator.", "type": "string", "enum": ["vulnerable_dependency"] },
+            "purl": { "description": "Package URL: type, namespace, name, version.", "type": "string" },
+            "advisory_id": { "description": "Canonical advisory id (OSV id).", "type": "string" },
+            "manifest_path": { "description": "Normalized lockfile/manifest path (DET-005).", "type": "string" }
+          }
+        },
+        {
+          "description": "Identity of a vulnerable package inside a container image.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finding_class", "purl", "advisory_id", "image_digest"],
+          "properties": {
+            "finding_class": { "description": "Discriminator.", "type": "string", "enum": ["container_vulnerability"] },
+            "purl": { "description": "Package URL: type, namespace, name, version.", "type": "string" },
+            "advisory_id": { "description": "Canonical advisory id (OSV id).", "type": "string" },
+            "image_digest": { "description": "OCI image digest.", "type": "string" }
+          }
+        },
+        {
+          "description": "Identity of an exposed secret. Carries a truncated fingerprint, never the value (SEC-101).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finding_class", "rule_id", "path", "fingerprint"],
+          "properties": {
+            "finding_class": { "description": "Discriminator.", "type": "string", "enum": ["exposed_secret"] },
+            "rule_id": { "description": "Secrets rule id.", "type": "string" },
+            "path": { "description": "Normalized path (DET-005).", "type": "string" },
+            "fingerprint": { "description": "Truncated secret fingerprint (SEC-101).", "type": "string" }
+          }
+        },
+        {
+          "description": "Identity of an IaC misconfiguration.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finding_class", "policy_id", "path", "resource_address"],
+          "properties": {
+            "finding_class": { "description": "Discriminator.", "type": "string", "enum": ["iac_misconfiguration"] },
+            "policy_id": { "description": "Policy id from the rule pack (IAC-001).", "type": "string" },
+            "path": { "description": "Normalized path (DET-005).", "type": "string" },
+            "resource_address": { "description": "Address of the resource within the file.", "type": "string" }
+          }
+        },
+        {
+          "description": "Identity of a web exposure found by a probe template.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finding_class", "template_id", "origin", "request_path"],
+          "properties": {
+            "finding_class": { "description": "Discriminator.", "type": "string", "enum": ["web_exposure"] },
+            "template_id": { "description": "Probe template id.", "type": "string" },
+            "origin": { "description": "Normalized origin: scheme + host + port.", "type": "string" },
+            "request_path": { "description": "Matched request path.", "type": "string" }
+          }
+        },
+        {
+          "description": "Identity of a structural (SAST) pattern match.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finding_class", "rule_id", "path", "structural_hash"],
+          "properties": {
+            "finding_class": { "description": "Discriminator.", "type": "string", "enum": ["structural_pattern"] },
+            "rule_id": { "description": "Structural rule id.", "type": "string" },
+            "path": { "description": "Normalized path (DET-005).", "type": "string" },
+            "structural_hash": { "description": "Hash of tree-sitter node kinds plus normalized identifiers — never line numbers (spec 7.7.3).", "type": "string" }
+          }
+        }
+      ]
+    },
+    "RawFinding": {
+      "description": "What an Engine emits into the FindingSink: identity plus presentation, before dedup, enrichment, and scoring (spec 6.1).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "title", "severity", "confidence", "asset", "location"],
+      "properties": {
+        "identity": { "description": "Class-discriminated identity tuple.", "$ref": "#/definitions/IdentityKey" },
+        "title": { "description": "One-line human-readable title.", "type": "string" },
+        "description": { "description": "Longer human-readable description.", "type": "string" },
+        "severity": { "description": "Severity from the engine's explicit severity map (ENG-004).", "$ref": "#/definitions/Severity" },
+        "confidence": { "description": "Engine's confidence in the observation.", "$ref": "#/definitions/Confidence" },
+        "asset": { "description": "Entity the observation is attached to.", "$ref": "#/definitions/Asset" },
+        "location": { "description": "Where it was observed.", "$ref": "#/definitions/Location" },
+        "evidence": { "description": "Attached redacted evidence.", "type": "array", "items": { "$ref": "#/definitions/Evidence" } },
+        "rule_id": { "description": "Rule/policy/advisory id for sources attribution.", "type": "string" },
+        "remediation": { "description": "Fix information if the engine knows it.", "$ref": "#/definitions/Remediation" },
+        "cwe": { "description": "Associated CWE ids, e.g. CWE-200.", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Finding": {
+      "description": "One normalized, deduplicated observation — the unit of all MultiScan output (spec 2).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "identity", "title", "severity", "confidence", "status", "risk_score", "score_explanation", "asset", "location", "sources"],
+      "properties": {
+        "finding_id": { "description": "Stable identity hash (spec 7.7.1).", "$ref": "#/definitions/FindingId" },
+        "identity": { "description": "The tuple the id was computed from.", "$ref": "#/definitions/IdentityKey" },
+        "title": { "description": "One-line human-readable title.", "type": "string" },
+        "description": { "description": "Longer human-readable description.", "type": "string" },
+        "severity": { "description": "Derived ordinal severity.", "$ref": "#/definitions/Severity" },
+        "confidence": { "description": "Merged confidence; two engines reporting the same id escalate to at least corroborated (spec 7.7.5).", "$ref": "#/definitions/Confidence" },
+        "status": { "description": "Lifecycle status.", "$ref": "#/definitions/FindingStatus" },
+        "risk_score": { "description": "0.0-100.0 per the spec 8 formula.", "type": "number" },
+        "score_explanation": { "description": "Full score provenance (RSK-005).", "$ref": "#/definitions/ScoreExplanation" },
+        "asset": { "description": "Entity the Finding is attached to.", "$ref": "#/definitions/Asset" },
+        "location": { "description": "Where it was observed.", "$ref": "#/definitions/Location" },
+        "evidence": { "description": "Merged redacted evidence.", "type": "array", "items": { "$ref": "#/definitions/Evidence" } },
+        "sources": { "description": "Every engine/bridge that reported it (BRG-001).", "type": "array", "items": { "$ref": "#/definitions/Source" }, "minItems": 1 },
+        "remediation": { "description": "Fix information.", "$ref": "#/definitions/Remediation" },
+        "cwe": { "description": "Associated CWE ids.", "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

@@ -10,6 +10,14 @@ anyhow.workspace = true
 clap.workspace = true
 toml.workspace = true
 cargo_metadata = "0.20"
+serde_json.workspace = true
+blake3.workspace = true
+# Codegen pipeline (R-4). typify is pinned exactly: its output style may shift
+# between versions, and generated-code churn must be a deliberate, reviewable event.
+typify = "=0.7.0"
+schemars = "0.8"
+prettyplease = "0.2"
+syn = { version = "2", features = ["full"] }
 
 [lints]
 workspace = true

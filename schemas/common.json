@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MultiScan common types",
+  "definitions": {
+    "Severity": {
+      "description": "Ordinal severity, always derived from an explicit engine severity map (ENG-004). Variant order is the ordinal order — do not reorder (spec 2).",
+      "type": "string",
+      "enum": ["informational", "low", "medium", "high", "critical"]
+    },
+    "Confidence": {
+      "description": "Confidence in a Finding, ascending ordinal order (spec 8: Unconfirmed 0.50, Heuristic 0.70, Corroborated 0.85, Proven 1.00). Do not reorder.",
+      "type": "string",
+      "enum": ["unconfirmed", "heuristic", "corroborated", "proven"]
+    },
+    "FindingClass": {
+      "description": "The class of weakness a Finding describes; selects the identity tuple shape (spec 7.7.2).",
+      "type": "string",
+      "enum": [
+        "vulnerable_dependency",
+        "container_vulnerability",
+        "exposed_secret",
+        "iac_misconfiguration",
+        "web_exposure",
+        "structural_pattern"
+      ]
+    },
+    "Layer": {
+      "description": "A detection layer selectable via --layers (spec 4.2).",
+      "type": "string",
+      "enum": ["sca", "secrets", "iac", "sast", "probe"]
+    },
+    "NetworkImpact": {
+      "description": "Network impact of an Engine. Exactly two variants; a destructive variant MUST never be added — NG-1 is enforced by this type (ENG-001).",
+      "type": "string",
+      "enum": ["read_only", "active_safe"]
+    },
+    "Profile": {
+      "description": "Scan profile (spec 4.2).",
+      "type": "string",
+      "enum": ["quick", "standard", "thorough"]
+    },
+    "AssetKind": {
+      "description": "Kind of scannable entity (spec 2: Asset).",
+      "type": "string",
+      "enum": ["repo", "file", "image", "package", "endpoint"]
+    },
+    "FindingStatus": {
+      "description": "Lifecycle status. Only a Complete engine outcome may transition a Finding to fixed (spec 7.7.4).",
+      "type": "string",
+      "enum": ["open", "fixed", "suppressed"]
+    },
+    "FindingId": {
+      "description": "blake3 of the identity tuple, truncated to 32 bytes, lowercase hex (spec 7.7.1). An identity, not a security primitive.",
+      "type": "string"
+    }
+  }
+}
