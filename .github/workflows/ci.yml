@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.78"
+          toolchain: "1.85"
       - uses: Swatinem/rust-cache@v2
       - name: Build product crates on MSRV
         run: cargo build --workspace --exclude xtask

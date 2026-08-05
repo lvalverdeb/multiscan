@@ -182,6 +182,62 @@ pub fn scan_timestamp() -> String {
     }
 }
 
+/// `multiscan scan image <ref>` — pull the image (digest-verified) and extract
+/// its layers into a confined temp root (SCA-005). Package-database resolution
+/// → findings lands in T-402; until then this reports what it extracted and is
+/// explicit that no vulnerability scan ran yet.
+fn scan_image(reference: &str, quiet: bool) -> Result<Exit> {
+    use multiscan_sca::image::{extract_image, OciClient, Reference};
+
+    let parsed = match Reference::parse(reference) {
+        Ok(r) => r,
+        Err(e) => return Ok(usage(&e.to_string())),
+    };
+    let client = OciClient::new();
+    let image = match client.pull(&parsed) {
+        Ok(image) => image,
+        Err(e) => {
+            eprintln!("multiscan: error: pulling {reference}: {e}");
+            return Ok(Exit::ScanError);
+        }
+    };
+
+    let temp = match tempfile::tempdir() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("multiscan: error: creating extraction dir: {e}");
+            return Ok(Exit::ScanError);
+        }
+    };
+    let stats = match extract_image(&image.layers, temp.path()) {
+        Ok(stats) => stats,
+        Err(e) => {
+            // A hostile layer (path escape, cap exceeded) is a scan error.
+            eprintln!("multiscan: error: extracting image layers: {e}");
+            return Ok(Exit::ScanError);
+        }
+    };
+    if !quiet {
+        eprintln!(
+            "multiscan: pulled {} ({}), extracted {} files from {} layer(s)",
+            reference,
+            image.manifest_digest,
+            stats.files,
+            image.layers.len()
+        );
+        // Honesty: extraction succeeded, but package resolution is not wired
+        // yet — do not let this read as a clean vulnerability scan.
+        eprintln!(
+            "multiscan: note: image package-database scanning is not implemented yet \
+             (lands in T-402); no vulnerabilities were assessed"
+        );
+    }
+    // No findings surface yet; a clean exit reflects "nothing assessed", stated
+    // above, not "nothing found".
+    println!("No findings.");
+    Ok(Exit::Clean)
+}
+
 /// Entry point for `multiscan scan`.
 pub fn run(args: &ScanArgs) -> Result<Exit> {
     // Remote targets first: authorization is a hard gate (SEC-001, NG-5).
@@ -200,10 +256,8 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
                 "scan web is not implemented yet (lands in T-501/T-502)",
             ));
         }
-        Some(ScanTarget::Image { .. }) => {
-            return Ok(usage(
-                "scan image is not implemented yet (lands in T-401/T-402)",
-            ));
+        Some(ScanTarget::Image { reference }) => {
+            return scan_image(reference, args.quiet);
         }
         None => {}
     }

@@ -4,6 +4,7 @@ description = "MultiScan command-line interface: argument parsing, config resolu
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [[bin]]
@@ -22,6 +23,7 @@ multiscan-secrets.workspace = true
 multiscan-iac.workspace = true
 multiscan-store.workspace = true
 multiscan-bridge.workspace = true
+tempfile.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true

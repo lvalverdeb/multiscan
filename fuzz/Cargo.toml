@@ -1,0 +1,28 @@
+# cargo-fuzz targets. Detached from the main workspace (its own [workspace])
+# so the fuzzing toolchain and libfuzzer-sys never enter the product build.
+# Run with: cargo +nightly fuzz run tar_extract  (release-blocking, NFR-010).
+[package]
+name = "multiscan-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tempfile = "3"
+multiscan-sca = { path = "../crates/engines/multiscan-sca" }
+
+# The fuzz harness requires unsafe; it is not first-party product code, so
+# NFR-009 (forbid unsafe in first-party crates) does not apply here.
+
+[[bin]]
+name = "tar_extract"
+path = "fuzz_targets/tar_extract.rs"
+test = false
+doc = false
+bench = false

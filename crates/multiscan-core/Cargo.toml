@@ -4,6 +4,7 @@ description = "Core generated types: Finding, Asset, Severity, Confidence, IDs. 
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

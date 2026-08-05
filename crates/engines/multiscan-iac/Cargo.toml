@@ -4,6 +4,7 @@ description = "IaC engine: HCL/YAML/JSON normalization and policy evaluation (sp
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 publish = false
 
 [dependencies]

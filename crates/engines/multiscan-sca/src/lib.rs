@@ -5,6 +5,7 @@
 //! matching uses each ecosystem's own ordering (SCA-002); a malformed file
 //! degrades to `Partial`, never aborts the scan.
 
+pub mod image;
 mod lockfile;
 mod osv;
 mod version;
