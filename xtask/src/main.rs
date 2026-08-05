@@ -4,6 +4,7 @@
 //! shipped binary, and exempt from the unwrap/expect/panic bans (CLAUDE.md).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod bench;
 mod determinism;
 mod gen;
 mod golden;
@@ -61,17 +62,10 @@ fn main() -> Result<()> {
         Cmd::Determinism { runs } => determinism::run(runs),
         Cmd::Safety => safety(),
         Cmd::Offline => offline::run(),
-        Cmd::Bench => stub("bench", "T-601"),
+        Cmd::Bench => bench::run(),
         Cmd::Purity => purity::run(),
         Cmd::Ci => ci(),
     }
-}
-
-/// Placeholder for subcommands whose real implementation lands in a later task.
-/// Prints a loud SKIP so the CI ladder stays honest about what it covered.
-fn stub(name: &str, lands_in: &str) -> Result<()> {
-    eprintln!("xtask {name}: SKIP — not implemented yet (lands in {lands_in})");
-    Ok(())
 }
 
 /// Scope/authorization negative suite — release-blocking (spec 16, SEC-001..009).
@@ -120,6 +114,7 @@ fn ci() -> Result<()> {
     util::run("cargo", &["xtask", "determinism"])?;
     util::run("cargo", &["xtask", "safety"])?;
     util::run("cargo", &["xtask", "offline"])?;
+    util::run("cargo", &["xtask", "bench"])?;
     util::run("cargo", &["deny", "check"])?;
     eprintln!("xtask ci: all gates green");
     Ok(())

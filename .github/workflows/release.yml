@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Cross-compilation matrix (NFR-007): linux gnu/musl x86_64+aarch64,
+# macOS x86_64+aarch64, windows x86_64. The musl builds are fully static
+# (NFR-008) and run on a `scratch` container.
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross (Linux cross targets)
+        if: contains(matrix.target, 'linux')
+        run: cargo install cross --locked || true
+      - name: Build release binary
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == *linux* && "${{ matrix.target }}" != x86_64-unknown-linux-gnu ]]; then
+            cross build --release --target ${{ matrix.target }} -p multiscan-cli
+          else
+            rustup target add ${{ matrix.target }} || true
+            cargo build --release --target ${{ matrix.target }} -p multiscan-cli
+          fi
+      - name: Size gate (NFR-004)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo xtask bench
+      - name: Package
+        shell: bash
+        run: |
+          bin="multiscan"
+          [[ "${{ matrix.target }}" == *windows* ]] && bin="multiscan.exe"
+          tar -C target/${{ matrix.target }}/release -czf \
+            multiscan-${{ matrix.target }}.tar.gz "$bin"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: multiscan-${{ matrix.target }}
+          path: multiscan-${{ matrix.target }}.tar.gz
+
+  # NFR-008: verify the static musl binary runs on a bare `scratch` image.
+  scratch-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: multiscan-x86_64-unknown-linux-musl
+      - name: Run on scratch
+        run: |
+          tar xzf multiscan-x86_64-unknown-linux-musl.tar.gz
+          printf 'FROM scratch\nCOPY multiscan /multiscan\nENTRYPOINT ["/multiscan"]\n' > Dockerfile
+          docker build -t multiscan-scratch .
+          docker run --rm multiscan-scratch --version
