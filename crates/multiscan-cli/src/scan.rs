@@ -182,26 +182,35 @@ pub fn scan_timestamp() -> String {
     }
 }
 
-/// `multiscan scan image <ref>` — pull the image (digest-verified) and extract
-/// its layers into a confined temp root (SCA-005). Package-database resolution
-/// → findings lands in T-402; until then this reports what it extracted and is
-/// explicit that no vulnerability scan ran yet.
-fn scan_image(reference: &str, quiet: bool) -> Result<Exit> {
-    use multiscan_sca::image::{extract_image, OciClient, Reference};
+/// `multiscan scan image <ref>` — pull the image (digest-verified), extract its
+/// layers into a confined temp root (SCA-005), resolve OS packages against the
+/// pinned OSV snapshot, and emit `ContainerVulnerability` findings (FR-002).
+fn scan_image(reference: &str, args: &ScanArgs) -> Result<Exit> {
+    use multiscan_sca::image::{extract_image, scan_os_packages, OciClient, Reference};
+
+    let format = match args.format.as_deref() {
+        None => Format::Table,
+        Some(name) => match Format::parse(name) {
+            Some(f) => f,
+            None => return Ok(usage(&format!("unknown format `{name}`"))),
+        },
+    };
+    let fail_on = match parse_fail_on(args.fail_on.as_deref())? {
+        Ok(f) => f,
+        Err(exit) => return Ok(exit),
+    };
 
     let parsed = match Reference::parse(reference) {
         Ok(r) => r,
         Err(e) => return Ok(usage(&e.to_string())),
     };
-    let client = OciClient::new();
-    let image = match client.pull(&parsed) {
+    let image = match OciClient::new().pull(&parsed) {
         Ok(image) => image,
         Err(e) => {
             eprintln!("multiscan: error: pulling {reference}: {e}");
             return Ok(Exit::ScanError);
         }
     };
-
     let temp = match tempfile::tempdir() {
         Ok(t) => t,
         Err(e) => {
@@ -209,33 +218,121 @@ fn scan_image(reference: &str, quiet: bool) -> Result<Exit> {
             return Ok(Exit::ScanError);
         }
     };
-    let stats = match extract_image(&image.layers, temp.path()) {
-        Ok(stats) => stats,
-        Err(e) => {
-            // A hostile layer (path escape, cap exceeded) is a scan error.
-            eprintln!("multiscan: error: extracting image layers: {e}");
-            return Ok(Exit::ScanError);
-        }
-    };
-    if !quiet {
+    if let Err(e) = extract_image(&image.layers, temp.path()) {
+        // A hostile layer (path escape, cap exceeded) is a scan error.
+        eprintln!("multiscan: error: extracting image layers: {e}");
+        return Ok(Exit::ScanError);
+    }
+
+    // OS-package resolution needs the pinned OSV snapshot.
+    let feed_cache = multiscan_feeds::current_snapshot(&multiscan_feeds::cache_dir())
+        .ok()
+        .flatten()
+        .map(|_| multiscan_feeds::cache_dir());
+    let scan = scan_os_packages(temp.path(), &image.manifest_digest, feed_cache.as_deref());
+
+    if !args.quiet {
+        let os = scan
+            .os
+            .as_ref()
+            .map(|o| {
+                format!(
+                    "{}{}",
+                    o.id,
+                    o.version_id
+                        .as_deref()
+                        .map(|v| format!(" {v}"))
+                        .unwrap_or_default()
+                )
+            })
+            .unwrap_or_else(|| "unknown OS".to_string());
         eprintln!(
-            "multiscan: pulled {} ({}), extracted {} files from {} layer(s)",
-            reference,
-            image.manifest_digest,
-            stats.files,
-            image.layers.len()
+            "multiscan: {reference} ({}): {os}, {} package(s)",
+            image.manifest_digest, scan.package_count
         );
-        // Honesty: extraction succeeded, but package resolution is not wired
-        // yet — do not let this read as a clean vulnerability scan.
+        if let Some(reason) = &scan.partial {
+            eprintln!("multiscan: warning: {reason}");
+        }
+    }
+
+    // Score the container findings through the shared pipeline.
+    let attributed: Vec<Attributed> = scan
+        .findings
+        .into_iter()
+        .map(|raw| Attributed {
+            engine_id: "multiscan.sca".to_string(),
+            raw,
+        })
+        .collect();
+    let merged = multiscan_dedup::merge(attributed);
+    let enrichment = feed_cache
+        .as_ref()
+        .and_then(|cache| multiscan_feeds::current_snapshot(cache).ok().flatten())
+        .and_then(|s| s.enrichment().ok());
+    let feed_snapshot_id = feed_cache
+        .as_ref()
+        .and_then(|cache| multiscan_feeds::current_snapshot(cache).ok().flatten())
+        .map(|s| s.manifest.snapshot_id);
+    let mut findings: Vec<Finding> = merged
+        .into_iter()
+        .map(|m| {
+            assemble_finding(
+                m,
+                &RiskContext::default(),
+                feed_snapshot_id.clone(),
+                enrichment.as_ref(),
+            )
+        })
+        .collect();
+    sort_findings(&mut findings);
+
+    let blocking: Vec<&Finding> = findings
+        .iter()
+        .filter(|f| match &fail_on {
+            None => false,
+            Some(FailOn::Number(t)) => f.risk_score >= *t,
+            Some(FailOn::Severity(t)) => f.severity >= *t,
+        })
+        .collect();
+    for f in &blocking {
         eprintln!(
-            "multiscan: note: image package-database scanning is not implemented yet \
-             (lands in T-402); no vulnerabilities were assessed"
+            "multiscan: gate: {} (score {:.1}) meets --fail-on",
+            f.finding_id, f.risk_score
         );
     }
-    // No findings surface yet; a clean exit reflects "nothing assessed", stated
-    // above, not "nothing found".
-    println!("No findings.");
-    Ok(Exit::Clean)
+    let gate_failed = !blocking.is_empty();
+
+    let footer = multiscan_report::Footer {
+        scanned_at: scan_timestamp(),
+        feed_snapshot_id,
+    };
+    print!("{}", render(format, &findings, &footer));
+
+    Ok(if scan.partial.is_some() {
+        Exit::ScanError
+    } else if gate_failed {
+        Exit::GateFailed
+    } else {
+        Exit::Clean
+    })
+}
+
+/// Parse a `--fail-on` value into a threshold. The outer Result is for I/O
+/// errors (none here); the inner distinguishes a usage error (Exit) from a
+/// parsed value.
+fn parse_fail_on(raw: Option<&str>) -> Result<Result<Option<FailOn>, Exit>, anyhow::Error> {
+    Ok(match raw {
+        None => Ok(None),
+        Some(raw) => match raw.parse::<f64>() {
+            Ok(n) => Ok(Some(FailOn::Number(n))),
+            Err(_) => match parse_enum::<Severity>(raw) {
+                Some(sev) => Ok(Some(FailOn::Severity(sev))),
+                None => Err(usage(&format!(
+                    "--fail-on `{raw}` is neither a number nor a severity"
+                ))),
+            },
+        },
+    })
 }
 
 /// Entry point for `multiscan scan`.
@@ -257,7 +354,7 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
             ));
         }
         Some(ScanTarget::Image { reference }) => {
-            return scan_image(reference, args.quiet);
+            return scan_image(reference, args);
         }
         None => {}
     }

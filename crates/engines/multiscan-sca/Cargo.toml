@@ -22,6 +22,8 @@ ureq.workspace = true
 toml.workspace = true
 semver.workspace = true
 pep440_rs.workspace = true
+debversion.workspace = true
+rpm.workspace = true
 
 [dev-dependencies]
 flate2.workspace = true

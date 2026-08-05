@@ -90,11 +90,12 @@ pub struct ScanArgs {
     pub profile: Option<String>,
 
     /// Output format: table | json | jsonl | sarif | sbom | markdown.
-    #[arg(long)]
+    /// Global so it works before or after an `image`/`web` subcommand.
+    #[arg(long, global = true)]
     pub format: Option<String>,
 
     /// Gate threshold: a risk score number or a severity name. Exit 1 when met.
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub fail_on: Option<String>,
 
     /// Baseline file: gate only on new Findings.
@@ -102,7 +103,7 @@ pub struct ScanArgs {
     pub baseline: Option<PathBuf>,
 
     /// Never touch the network; fail loudly on stale feeds (exit 5).
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub offline: bool,
 
     /// Maximum acceptable advisory-data age, e.g. 7d.
@@ -130,11 +131,11 @@ pub struct ScanArgs {
     pub no_color: bool,
 
     /// Machine output on stdout only.
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub quiet: bool,
 
     /// Verbose diagnostics on stderr.
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub verbose: bool,
 
     /// Dev-only: register the testkit fixture engine emitting N findings.

@@ -77,6 +77,8 @@ serde_yaml_ng = "0.10"
 rusqlite = { version = "0.37", features = ["bundled"] }
 semver = "1"
 pep440_rs = "0.7"
+debversion = "0.5"
+rpm = { version = "0.18", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 
 # Network (feeds + probe only; scan targets go through multiscan-scope, R-6).

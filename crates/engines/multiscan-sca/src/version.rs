@@ -14,6 +14,12 @@ pub enum Scheme {
     Semver,
     /// PyPI — PEP 440.
     Pep440,
+    /// Debian/Ubuntu — dpkg version ordering (epoch:upstream-revision).
+    Debian,
+    /// Alpine — apk version ordering.
+    Apk,
+    /// RPM (RHEL/Fedora/SUSE) — EVR ordering.
+    Rpm,
     /// Fallback: dotted numeric segments, then lexical. Used where a precise
     /// scheme is not yet wired (Maven/RubyGems/etc. get dedicated schemes as
     /// their fixtures land). Never a silent naive string compare.
@@ -21,11 +27,17 @@ pub enum Scheme {
 }
 
 impl Scheme {
-    /// The OSV ecosystem string this scheme applies to.
+    /// The OSV ecosystem string this scheme applies to. OS ecosystems are
+    /// release-qualified in OSV (`Debian:11`, `Ubuntu:22.04`, `Alpine:v3.20`,
+    /// `Red Hat`, `Rocky Linux:9`, …), so we match on a prefix.
     pub fn for_osv_ecosystem(ecosystem: &str) -> Scheme {
-        match ecosystem {
+        let base = ecosystem.split(':').next().unwrap_or(ecosystem);
+        match base {
             "crates.io" | "npm" | "Go" => Scheme::Semver,
             "PyPI" => Scheme::Pep440,
+            "Debian" | "Ubuntu" => Scheme::Debian,
+            "Alpine" => Scheme::Apk,
+            "Red Hat" | "Rocky Linux" | "AlmaLinux" | "openSUSE" | "SUSE" | "Fedora" => Scheme::Rpm,
             _ => Scheme::Generic,
         }
     }
@@ -37,9 +49,117 @@ impl Scheme {
         match self {
             Scheme::Semver => cmp_with(a, b, parse_semver),
             Scheme::Pep440 => cmp_with(a, b, parse_pep440),
+            Scheme::Debian => cmp_with(a, b, parse_debian),
+            Scheme::Apk => cmp_apk(a, b),
+            Scheme::Rpm => cmp_rpm(a, b),
             Scheme::Generic => cmp_generic(a, b),
         }
     }
+}
+
+fn parse_debian(v: &str) -> Option<debversion::Version> {
+    v.parse::<debversion::Version>().ok()
+}
+
+/// RPM EVR comparison via the `rpm` crate's label ordering (`epoch:version-release`).
+fn cmp_rpm(a: &str, b: &str) -> Ordering {
+    rpm::rpm_evr_compare(a, b)
+}
+
+/// Alpine apk version comparison. apk versions are dot-separated numeric
+/// components, then an optional letter, then optional `_suffixN` pre/post
+/// tags, then an optional `-rN` build revision. This implements the ordering
+/// apk-tools uses (hand-rolled: no maintained crate, cf. plan). Suffixes rank:
+/// alpha < beta < pre < rc < (release) < cvs < svn < git < hg < p.
+fn cmp_apk(a: &str, b: &str) -> Ordering {
+    fn suffix_rank(s: &str) -> i32 {
+        match s {
+            "alpha" => 0,
+            "beta" => 1,
+            "pre" => 2,
+            "rc" => 3,
+            "cvs" => 5,
+            "svn" => 6,
+            "git" => 7,
+            "hg" => 8,
+            "p" => 9,
+            _ => 4, // plain release sits between rc and post tags
+        }
+    }
+    // Split off the -rN build revision.
+    let (a_main, a_rev) = a.rsplit_once("-r").unwrap_or((a, "0"));
+    let (b_main, b_rev) = b.rsplit_once("-r").unwrap_or((b, "0"));
+
+    // Split main into numeric-dotted part, trailing letter, and _suffix.
+    fn parts(main: &str) -> (Vec<u64>, Option<char>, Vec<(i32, u64)>) {
+        let (head, suffixes) = match main.split_once('_') {
+            Some((h, s)) => (h, s),
+            None => (main, ""),
+        };
+        // Trailing single letter (e.g. `1.2.3a`).
+        let (num_str, letter) = if head
+            .chars()
+            .last()
+            .map(|c| c.is_ascii_alphabetic())
+            .unwrap_or(false)
+        {
+            let mut chars = head.chars();
+            let last = chars.next_back();
+            (chars.as_str().to_string(), last)
+        } else {
+            (head.to_string(), None)
+        };
+        let nums: Vec<u64> = num_str
+            .split('.')
+            .map(|n| n.parse::<u64>().unwrap_or(0))
+            .collect();
+        // Parse `_suffixN_suffixM...`.
+        let mut sfx = Vec::new();
+        for token in suffixes.split('_').filter(|t| !t.is_empty()) {
+            let split = token
+                .char_indices()
+                .find(|(_, c)| c.is_ascii_digit())
+                .map(|(i, _)| i)
+                .unwrap_or(token.len());
+            let (word, num) = token.split_at(split);
+            sfx.push((suffix_rank(word), num.parse::<u64>().unwrap_or(0)));
+        }
+        (nums, letter, sfx)
+    }
+
+    // A missing suffix is "release": rank 4, between rc (3) and post tags (5+).
+    // So `1.0_alpha1` < `1.0` < `1.0_p1`. Compare element-wise, padding the
+    // shorter side with the release baseline.
+    fn cmp_suffixes(a: &[(i32, u64)], b: &[(i32, u64)]) -> Ordering {
+        let release = (4i32, 0u64);
+        for i in 0..a.len().max(b.len()) {
+            let x = a.get(i).copied().unwrap_or(release);
+            let y = b.get(i).copied().unwrap_or(release);
+            match x.cmp(&y) {
+                Ordering::Equal => {}
+                other => return other,
+            }
+        }
+        Ordering::Equal
+    }
+
+    let (an, al, asfx) = parts(a_main);
+    let (bn, bl, bsfx) = parts(b_main);
+    an.iter()
+        .zip(bn.iter())
+        .find_map(|(x, y)| match x.cmp(y) {
+            Ordering::Equal => None,
+            other => Some(other),
+        })
+        .unwrap_or_else(|| an.len().cmp(&bn.len()))
+        .then_with(|| al.cmp(&bl))
+        .then_with(|| cmp_suffixes(&asfx, &bsfx))
+        .then_with(|| {
+            a_rev
+                .parse::<u64>()
+                .unwrap_or(0)
+                .cmp(&b_rev.parse::<u64>().unwrap_or(0))
+        })
 }
 
 fn cmp_with<T: Ord>(a: &str, b: &str, parse: fn(&str) -> Option<T>) -> Ordering {
@@ -120,5 +240,42 @@ mod tests {
         assert_eq!(Scheme::for_osv_ecosystem("crates.io"), Scheme::Semver);
         assert_eq!(Scheme::for_osv_ecosystem("PyPI"), Scheme::Pep440);
         assert_eq!(Scheme::for_osv_ecosystem("Maven"), Scheme::Generic);
+        // OS ecosystems are release-qualified in OSV.
+        assert_eq!(Scheme::for_osv_ecosystem("Debian:11"), Scheme::Debian);
+        assert_eq!(Scheme::for_osv_ecosystem("Ubuntu:22.04"), Scheme::Debian);
+        assert_eq!(Scheme::for_osv_ecosystem("Alpine:v3.20"), Scheme::Apk);
+        assert_eq!(Scheme::for_osv_ecosystem("Red Hat"), Scheme::Rpm);
+    }
+
+    #[test]
+    fn debian_dpkg_ordering() {
+        // Debian revisions and epochs order correctly (not as strings).
+        assert_eq!(
+            Scheme::Debian.compare("1.1.1n-0+deb11u1", "1.1.1n-0+deb11u3"),
+            Less
+        );
+        assert_eq!(Scheme::Debian.compare("2:1.0", "1:9.9"), Greater); // epoch wins
+        assert_eq!(Scheme::Debian.compare("1.10", "1.9"), Greater);
+    }
+
+    #[test]
+    fn apk_ordering() {
+        // Build revision.
+        assert_eq!(Scheme::Apk.compare("3.1.4-r5", "3.1.4-r10"), Less);
+        // Numeric components, not string.
+        assert_eq!(Scheme::Apk.compare("1.10.0-r0", "1.9.0-r0"), Greater);
+        // Pre-release suffix orders below release.
+        assert_eq!(Scheme::Apk.compare("1.0.0_alpha1-r0", "1.0.0-r0"), Less);
+        assert_eq!(
+            Scheme::Apk.compare("1.0.0_rc1-r0", "1.0.0_beta1-r0"),
+            Greater
+        );
+    }
+
+    #[test]
+    fn rpm_evr_ordering() {
+        assert_eq!(Scheme::Rpm.compare("1.0-1", "1.0-2"), Less);
+        assert_eq!(Scheme::Rpm.compare("1.10-1", "1.9-1"), Greater);
+        assert_eq!(Scheme::Rpm.compare("2:1.0-1", "1:2.0-1"), Greater); // epoch wins
     }
 }

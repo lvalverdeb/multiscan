@@ -34,6 +34,10 @@ serde_json.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+ureq.workspace = true
+tar.workspace = true
+flate2.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 chrono.workspace = true
 multiscan-feeds.workspace = true

@@ -7,7 +7,7 @@
 
 pub mod image;
 mod lockfile;
-mod osv;
+pub(crate) mod osv;
 mod version;
 
 use std::collections::BTreeMap;
@@ -144,13 +144,17 @@ fn find_lockfiles(root: &Path) -> Vec<(PathBuf, String, String)> {
 }
 
 /// OSV advisories indexed by lowercased package name, per ecosystem.
-struct OsvIndex {
+pub(crate) struct OsvIndex {
     by_name: BTreeMap<String, BTreeMap<String, Vec<Advisory>>>,
 }
 
 impl OsvIndex {
     fn load(ctx: &ScanContext) -> Option<Self> {
-        let cache = ctx.feed_cache_dir.as_ref()?;
+        Self::from_cache(ctx.feed_cache_dir.as_deref()?)
+    }
+
+    /// Load the OSV index from the snapshot pinned in `cache`.
+    pub(crate) fn from_cache(cache: &Path) -> Option<Self> {
         let snapshot = multiscan_feeds::current_snapshot(cache).ok()??;
         let mut by_name: BTreeMap<String, BTreeMap<String, Vec<Advisory>>> = BTreeMap::new();
         for name in snapshot.manifest.files.keys() {
@@ -183,7 +187,7 @@ impl OsvIndex {
         Some(Self { by_name })
     }
 
-    fn advisories_for(&self, ecosystem: &str, name: &str) -> &[Advisory] {
+    pub(crate) fn advisories_for(&self, ecosystem: &str, name: &str) -> &[Advisory] {
         self.by_name
             .get(ecosystem)
             .and_then(|m| m.get(&name.to_ascii_lowercase()))
