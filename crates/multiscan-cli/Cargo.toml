@@ -11,6 +11,22 @@ name = "multiscan"
 path = "src/main.rs"
 
 [dependencies]
+multiscan-core.workspace = true
+multiscan-engine.workspace = true
+multiscan-dedup.workspace = true
+multiscan-risk.workspace = true
+multiscan-report.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+chrono.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
