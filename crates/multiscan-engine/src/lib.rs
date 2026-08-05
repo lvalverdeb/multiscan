@@ -34,6 +34,10 @@ pub struct ScanContext {
     pub layers: Vec<Layer>,
     /// Pinned feed snapshot id for the whole Scan (FD-002), if feeds exist.
     pub feed_snapshot_id: Option<String>,
+    /// Cache directory holding the pinned `FeedSnapshot`. Engines that need
+    /// advisory data (SCA) load it from here; `None` when no snapshot is
+    /// pinned (secrets/iac need no feeds, FD-007).
+    pub feed_cache_dir: Option<PathBuf>,
     /// Authorization for remote probing (spec 9); local scans carry `None`.
     pub authorization: Option<multiscan_core::ScopeAuthorization>,
     /// Cooperative cancellation flag; engines MUST check it between units of

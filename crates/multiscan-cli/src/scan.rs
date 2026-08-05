@@ -240,7 +240,10 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         config: config.clone(),
         profile,
         layers,
-        feed_snapshot_id,
+        feed_snapshot_id: feed_snapshot_id.clone(),
+        feed_cache_dir: feed_snapshot_id
+            .as_ref()
+            .map(|_| multiscan_feeds::cache_dir()),
         authorization: None,
         cancel: Arc::new(AtomicBool::new(false)),
         deadline: None,
@@ -249,6 +252,9 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
 
     let mut registry = Registry::new();
     // Production engines register here as phases land (T-2xx).
+    if ctx.layers.contains(&Layer::Sca) {
+        registry.register(Box::new(multiscan_sca::ScaEngine::new()));
+    }
     if let Some(count) = args.testkit_fixture {
         if args.testkit_partial {
             registry.register(Box::new(FixtureEngine::partial(
@@ -309,9 +315,24 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         asset_criticality: config.risk.as_ref().and_then(|r| r.asset_criticality),
         data_classification: config.risk.as_ref().and_then(|r| r.data_classification),
     };
+    // Enrichment stage (spec 5.3): load KEV/EPSS from the pinned snapshot so
+    // dependency findings get a real factor X (spec 8). Absent snapshot ⇒
+    // every dependency scores with the documented `unavailable` default.
+    let enrichment = ctx
+        .feed_cache_dir
+        .as_ref()
+        .and_then(|cache| multiscan_feeds::current_snapshot(cache).ok().flatten())
+        .and_then(|snapshot| snapshot.enrichment().ok());
     let mut findings: Vec<Finding> = merged
         .into_iter()
-        .map(|m| assemble_finding(m, &risk_context, ctx.feed_snapshot_id.clone()))
+        .map(|m| {
+            assemble_finding(
+                m,
+                &risk_context,
+                ctx.feed_snapshot_id.clone(),
+                enrichment.as_ref(),
+            )
+        })
         .collect();
     sort_findings(&mut findings);
 
@@ -355,12 +376,44 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
     })
 }
 
-/// Exploit signal for scoring: dependency classes need feed enrichment
-/// (unavailable until T-201); the other classes have no CVE by nature.
-fn exploit_signal(identity: &IdentityKey) -> ExploitSignal {
-    match identity {
+/// CVE aliases the SCA engine stashed in evidence detail (`cve_aliases`).
+fn cve_aliases(merged: &MergedFinding) -> Vec<String> {
+    merged
+        .evidence
+        .iter()
+        .filter_map(|e| e.detail.get("cve_aliases"))
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .map(String::from)
+        .collect()
+}
+
+/// Exploit signal for scoring (spec 8, factor X). Dependency classes are
+/// enriched from KEV/EPSS when a snapshot is pinned; other classes have no CVE
+/// by nature.
+fn exploit_signal(
+    merged: &MergedFinding,
+    enrichment: Option<&multiscan_feeds::Enrichment>,
+) -> ExploitSignal {
+    match &merged.identity {
         IdentityKey::VulnerableDependency { .. } | IdentityKey::ContainerVulnerability { .. } => {
-            ExploitSignal::Unavailable
+            let Some(enrichment) = enrichment else {
+                return ExploitSignal::Unavailable;
+            };
+            let cves = cve_aliases(merged);
+            if cves.is_empty() {
+                // Advisory with no CVE alias: treat as no-CVE rather than
+                // claiming enrichment was unavailable.
+                return ExploitSignal::NoCve;
+            }
+            if enrichment.any_kev(&cves) {
+                ExploitSignal::Kev
+            } else if let Some(epss) = enrichment.max_epss(&cves) {
+                ExploitSignal::Epss(epss)
+            } else {
+                ExploitSignal::Unavailable
+            }
         }
         _ => ExploitSignal::NoCve,
     }
@@ -370,17 +423,19 @@ fn assemble_finding(
     merged: MergedFinding,
     risk_context: &RiskContext,
     feed_snapshot_id: Option<String>,
+    enrichment: Option<&multiscan_feeds::Enrichment>,
 ) -> Finding {
     let exposure = match merged.identity {
         IdentityKey::WebExposure { .. } => ExposureSignal::InternetReachable,
         _ => ExposureSignal::Unknown,
     };
+    let exploit = exploit_signal(&merged, enrichment);
     let scored = score(&ScoringInputs {
         severity: merged.severity,
         cvss_base: None,
         confidence: merged.confidence,
         exposure,
-        exploit: exploit_signal(&merged.identity),
+        exploit,
         context: *risk_context,
         feed_snapshot_id,
     });

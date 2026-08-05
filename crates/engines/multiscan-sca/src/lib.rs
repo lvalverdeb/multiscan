@@ -1,1 +1,363 @@
 //! SCA engine: lockfiles and OS packages to purl to OSV resolution (spec 7.1).
+//!
+//! Detection model: parse manifests/lockfiles → construct purls → resolve
+//! against the pinned OSV snapshot → emit `VulnerableDependency`. Version
+//! matching uses each ecosystem's own ordering (SCA-002); a malformed file
+//! degrades to `Partial`, never aborts the scan.
+
+mod lockfile;
+mod osv;
+mod version;
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use multiscan_core::{
+    Asset, AssetKind, Confidence, EngineManifest, Evidence, FindingClass, IdentityKey, Layer,
+    Location, NetworkImpact, RawFinding, Remediation, Severity,
+};
+use multiscan_engine::{
+    Applicability, Engine, EngineError, EngineOutcome, FindingSink, ScanContext,
+};
+
+pub use lockfile::ResolvedPackage;
+pub use osv::Advisory;
+pub use version::Scheme;
+
+/// Defensive caps for the tree walk and per-file reads (untrusted input).
+const MAX_LOCKFILE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_FILES_VISITED: usize = 1_000_000;
+
+/// The SCA engine.
+pub struct ScaEngine {
+    manifest: EngineManifest,
+}
+
+impl ScaEngine {
+    /// Construct the engine with its manifest.
+    pub fn new() -> Self {
+        Self {
+            manifest: EngineManifest {
+                id: "multiscan.sca".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                finding_classes: vec![
+                    FindingClass::VulnerableDependency,
+                    FindingClass::ContainerVulnerability,
+                ],
+                layers: vec![Layer::Sca],
+                network_impact: NetworkImpact::ReadOnly,
+                requires_authorization: false,
+                rule_set: None,
+                // OSV coarse severity label → our ordinal. Unknown labels
+                // default to Medium; nothing is inferred past the map (ENG-004).
+                severity_map: [
+                    ("CRITICAL", Severity::Critical),
+                    ("HIGH", Severity::High),
+                    ("MODERATE", Severity::Medium),
+                    ("MEDIUM", Severity::Medium),
+                    ("LOW", Severity::Low),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+            },
+        }
+    }
+
+    /// Map an advisory's coarse label to Severity; absent/unknown → Medium.
+    fn severity_for(&self, label: Option<&str>) -> Severity {
+        label
+            .and_then(|l| self.manifest.severity_map.get(&l.to_ascii_uppercase()))
+            .copied()
+            .unwrap_or(Severity::Medium)
+    }
+}
+
+impl Default for ScaEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Find lockfiles under `root`, bounded and skipping heavy vendor dirs.
+/// Returns (absolute path, root-relative POSIX path, file name), sorted.
+fn find_lockfiles(root: &Path) -> Vec<(PathBuf, String, String)> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    let mut visited = 0usize;
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            visited += 1;
+            if visited > MAX_FILES_VISITED {
+                found.sort_by(|a: &(PathBuf, String, String), b| a.1.cmp(&b.1));
+                return found;
+            }
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if matches!(name.as_str(), ".git" | "node_modules" | "target" | ".venv") {
+                    continue;
+                }
+                stack.push(path);
+            } else if lockfile::SUPPORTED_FILES.contains(&name.as_str()) {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                found.push((path, rel, name));
+            }
+        }
+    }
+    found.sort_by(|a, b| a.1.cmp(&b.1));
+    found
+}
+
+/// OSV advisories indexed by lowercased package name, per ecosystem.
+struct OsvIndex {
+    by_name: BTreeMap<String, BTreeMap<String, Vec<Advisory>>>,
+}
+
+impl OsvIndex {
+    fn load(ctx: &ScanContext) -> Option<Self> {
+        let cache = ctx.feed_cache_dir.as_ref()?;
+        let snapshot = multiscan_feeds::current_snapshot(cache).ok()??;
+        let mut by_name: BTreeMap<String, BTreeMap<String, Vec<Advisory>>> = BTreeMap::new();
+        for name in snapshot.manifest.files.keys() {
+            let Some(ecosystem) = name
+                .strip_prefix("osv/")
+                .and_then(|n| n.strip_suffix(".jsonl"))
+            else {
+                continue;
+            };
+            let Ok(bytes) = snapshot.read_file(name) else {
+                continue;
+            };
+            let index = by_name.entry(ecosystem.to_string()).or_default();
+            for line in bytes.split(|b| *b == b'\n') {
+                if line.is_empty() {
+                    continue;
+                }
+                if let Ok(advisory) = serde_json::from_slice::<Advisory>(line) {
+                    for affected in &advisory.affected {
+                        if let Some(pkg) = &affected.package {
+                            index
+                                .entry(pkg.name.to_ascii_lowercase())
+                                .or_default()
+                                .push(advisory.clone());
+                        }
+                    }
+                }
+            }
+        }
+        Some(Self { by_name })
+    }
+
+    fn advisories_for(&self, ecosystem: &str, name: &str) -> &[Advisory] {
+        self.by_name
+            .get(ecosystem)
+            .and_then(|m| m.get(&name.to_ascii_lowercase()))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+}
+
+impl Engine for ScaEngine {
+    fn manifest(&self) -> &EngineManifest {
+        &self.manifest
+    }
+
+    fn applicable(&self, ctx: &ScanContext) -> Applicability {
+        // Cheap: bounded existence check for any supported lockfile name.
+        if find_lockfiles(&ctx.root).is_empty() {
+            Applicability::NotApplicable
+        } else {
+            Applicability::Applicable
+        }
+    }
+
+    fn scan(
+        &self,
+        ctx: &ScanContext,
+        sink: &mut dyn FindingSink,
+    ) -> Result<EngineOutcome, EngineError> {
+        let index = OsvIndex::load(ctx);
+        let lockfiles = find_lockfiles(&ctx.root);
+        let total = lockfiles.len() as u64;
+        let mut scanned = 0u64;
+        let mut degraded: Option<String> = None;
+
+        for (abs, rel, name) in lockfiles {
+            if ctx.should_stop() {
+                return Ok(EngineOutcome::Partial {
+                    units_scanned: scanned,
+                    reason: "cancelled or past deadline".to_string(),
+                });
+            }
+            scanned += 1;
+            sink.progress(scanned, Some(total));
+
+            let Some(parse) = lockfile::parser_for(&name) else {
+                continue;
+            };
+            if std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0) > MAX_LOCKFILE_BYTES {
+                degraded = Some(format!("{rel}: exceeds size cap"));
+                continue;
+            }
+            let text = match std::fs::read_to_string(&abs) {
+                Ok(text) => text,
+                Err(e) => {
+                    degraded = Some(format!("{rel}: {e}"));
+                    continue;
+                }
+            };
+            let packages = match parse(&text) {
+                Ok(packages) => packages,
+                Err(reason) => {
+                    // SCA: a malformed lockfile degrades to Partial (spec 7.1).
+                    degraded = Some(reason);
+                    continue;
+                }
+            };
+
+            for package in packages {
+                self.emit_for_package(index.as_ref(), &rel, &package, sink)
+                    .map_err(|e| EngineError::Failed(e.to_string()))?;
+            }
+        }
+
+        match degraded {
+            Some(reason) => Ok(EngineOutcome::Partial {
+                units_scanned: scanned,
+                reason,
+            }),
+            None => Ok(EngineOutcome::Complete {
+                units_scanned: scanned,
+            }),
+        }
+    }
+}
+
+impl ScaEngine {
+    fn emit_for_package(
+        &self,
+        index: Option<&OsvIndex>,
+        manifest_path: &str,
+        package: &ResolvedPackage,
+        sink: &mut dyn FindingSink,
+    ) -> Result<(), multiscan_engine::SinkError> {
+        let asset = Asset {
+            kind: AssetKind::Package,
+            identifier: package.purl(),
+        };
+
+        // SCA-001: unpinned declarations are Informational/Unconfirmed, never
+        // silently skipped.
+        let Some(version) = &package.version else {
+            sink.emit(RawFinding {
+                identity: IdentityKey::VulnerableDependency {
+                    purl: package.purl(),
+                    advisory_id: "native:sca:unpinned".to_string(),
+                    manifest_path: manifest_path.to_string(),
+                },
+                title: format!("Unpinned dependency `{}`", package.name),
+                description: Some(
+                    "Version is not pinned; it cannot be resolved against advisories.".to_string(),
+                ),
+                severity: Severity::Informational,
+                confidence: Confidence::Unconfirmed,
+                asset,
+                location: Location {
+                    path: manifest_path.to_string(),
+                    line: None,
+                },
+                evidence: vec![],
+                rule_id: Some("native:sca:unpinned".to_string()),
+                remediation: Some(Remediation {
+                    fix_available: false,
+                    fixed_version: None,
+                    summary: Some("Pin the dependency to an exact version.".to_string()),
+                }),
+                cwe: vec![],
+            })?;
+            return Ok(());
+        };
+
+        let Some(index) = index else {
+            // No snapshot ⇒ no advisory data; the scan-side staleness policy
+            // (FD-004/FD-007) already warned.
+            return Ok(());
+        };
+
+        for advisory in index.advisories_for(&package.ecosystem, &package.name) {
+            let Some(m) = advisory.matches(&package.ecosystem, &package.name, version) else {
+                continue;
+            };
+            // Carry the advisory's CVE aliases so the post-dedup enrichment
+            // stage can look them up in KEV/EPSS for factor X (spec 8), without
+            // putting enrichment data into identity.
+            let mut detail = serde_json::Map::new();
+            let cves = advisory.cve_aliases();
+            if !cves.is_empty() {
+                detail.insert(
+                    "cve_aliases".to_string(),
+                    serde_json::Value::Array(
+                        cves.into_iter().map(serde_json::Value::String).collect(),
+                    ),
+                );
+            }
+            let mut evidence = vec![Evidence {
+                kind: "lockfile_entry".to_string(),
+                summary: format!("{}@{} in {manifest_path}", package.name, version),
+                detail,
+                // SCA-003: attribute transitive deps. A fuller dependency graph
+                // lands with per-ecosystem tree parsing; for now the package's
+                // own purl anchors the path.
+                dependency_path: vec![package.purl()],
+            }];
+            if let Some(summary) = &advisory.summary {
+                evidence.push(Evidence {
+                    kind: "advisory".to_string(),
+                    summary: summary.clone(),
+                    detail: serde_json::Map::new(),
+                    dependency_path: vec![],
+                });
+            }
+
+            sink.emit(RawFinding {
+                identity: IdentityKey::VulnerableDependency {
+                    purl: package.purl(),
+                    advisory_id: advisory.id.clone(),
+                    manifest_path: manifest_path.to_string(),
+                },
+                title: advisory
+                    .summary
+                    .clone()
+                    .unwrap_or_else(|| format!("{} affected by {}", package.name, advisory.id)),
+                description: advisory.summary.clone(),
+                severity: self.severity_for(advisory.severity_label()),
+                confidence: Confidence::Corroborated,
+                asset: asset.clone(),
+                location: Location {
+                    path: manifest_path.to_string(),
+                    line: None,
+                },
+                evidence,
+                rule_id: Some(advisory.id.clone()),
+                remediation: Some(Remediation {
+                    fix_available: m.fixed_version.is_some(),
+                    fixed_version: m.fixed_version.clone(),
+                    summary: m
+                        .fixed_version
+                        .as_ref()
+                        .map(|v| format!("Upgrade {} to {v}.", package.name)),
+                }),
+                cwe: advisory.cwe_ids(),
+            })?;
+        }
+        Ok(())
+    }
+}

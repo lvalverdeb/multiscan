@@ -189,6 +189,7 @@ pub fn test_context(layers: Vec<multiscan_core::Layer>) -> ScanContext {
         profile: multiscan_core::Profile::Standard,
         layers,
         feed_snapshot_id: None,
+        feed_cache_dir: None,
         authorization: None,
         cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         deadline: None,
