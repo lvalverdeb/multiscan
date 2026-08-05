@@ -8,6 +8,21 @@ license.workspace = true
 publish = false
 
 [dependencies]
+multiscan-core.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+ed25519-dalek.workspace = true
+psl.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+ed25519-dalek.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+chrono.workspace = true
 
 [lints]
 workspace = true

@@ -59,7 +59,7 @@ fn main() -> Result<()> {
         Cmd::Gen { check } => gen::run(check),
         Cmd::Golden { bless } => golden::run(bless),
         Cmd::Determinism { runs } => determinism::run(runs),
-        Cmd::Safety => stub("safety", "T-501"),
+        Cmd::Safety => safety(),
         Cmd::Offline => offline::run(),
         Cmd::Bench => stub("bench", "T-601"),
         Cmd::Purity => purity::run(),
@@ -71,6 +71,31 @@ fn main() -> Result<()> {
 /// Prints a loud SKIP so the CI ladder stays honest about what it covered.
 fn stub(name: &str, lands_in: &str) -> Result<()> {
     eprintln!("xtask {name}: SKIP — not implemented yet (lands in {lands_in})");
+    Ok(())
+}
+
+/// Scope/authorization negative suite — release-blocking (spec 16, SEC-001..009).
+/// Runs the authorization crate's safety tests plus the CLI-level web-scan
+/// refusal test. A single failure blocks the build.
+fn safety() -> Result<()> {
+    eprintln!("xtask safety: running scope/authorization negative suite");
+    util::run(
+        "cargo",
+        &["test", "-p", "multiscan-scope", "--test", "safety"],
+    )?;
+    // The CLI-level SEC-001 refusal (scan web without --authorization → exit 4).
+    util::run(
+        "cargo",
+        &[
+            "test",
+            "-p",
+            "multiscan-cli",
+            "--test",
+            "cli",
+            "web_scan_without_authorization_denied",
+        ],
+    )?;
+    eprintln!("xtask safety: OK");
     Ok(())
 }
 

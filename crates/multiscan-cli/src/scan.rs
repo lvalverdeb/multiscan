@@ -182,6 +182,130 @@ pub fn scan_timestamp() -> String {
     }
 }
 
+/// `multiscan scan web <url>` — the authorization gate (SEC-001, spec 9). Runs
+/// the static gate (parse → signature → window → attestation → wildcard safety
+/// → host+method in scope) with zero network I/O; any failure exits 4 and the
+/// decision is written to the audit log (SEC-008). Actual template probing
+/// lands in T-502.
+fn scan_web(url: &str, args: &crate::cli::ScanArgs) -> Result<Exit> {
+    use multiscan_scope::{AuditLog, Authorization, Decision};
+
+    // SEC-001: no authorization ⇒ deny before anything is resolved or sent.
+    let Some(auth_path) = &args.authorization else {
+        eprintln!(
+            "multiscan: scan web {url}: refusing to probe without --authorization \
+             (SEC-001); no request was sent"
+        );
+        return Ok(Exit::AuthDenied);
+    };
+
+    let host = match target_host(url) {
+        Some(h) => h,
+        None => return Ok(usage(&format!("scan web: cannot parse host from `{url}`"))),
+    };
+
+    let text = match std::fs::read_to_string(auth_path) {
+        Ok(t) => t,
+        Err(e) => return Ok(usage(&format!("reading {}: {e}", auth_path.display()))),
+    };
+    let parsed = match Authorization::from_toml(&text) {
+        Ok(a) => a,
+        Err(denied) => {
+            eprintln!(
+                "multiscan: scan web: authorization rejected: {}",
+                denied.rule()
+            );
+            return Ok(Exit::AuthDenied);
+        }
+    };
+
+    // Trusted key (hex) the signature must verify against; absent ⇒ deny.
+    let trusted_key = args.authorization_key.as_deref().and_then(parse_hex32);
+
+    let now = chrono::Utc::now();
+    let profile = args
+        .profile
+        .as_deref()
+        .and_then(parse_enum::<Profile>)
+        .unwrap_or(Profile::Standard);
+
+    let audit = AuditLog::open(std::path::Path::new(".multiscan/scope-audit.log"));
+
+    let verified = match parsed.verify(trusted_key.as_ref(), now, profile) {
+        Ok(v) => v,
+        Err(denied) => {
+            let decision = Decision::Denied(denied);
+            let _ = audit.record(&now.to_rfc3339(), "unknown", &host, "GET", &decision);
+            eprintln!("multiscan: scan web: {}", decision.rule());
+            return Ok(Exit::AuthDenied);
+        }
+    };
+
+    // Per-request static gate (host + method in scope).
+    let decision = verified.authorize(&host, "GET");
+    // SEC-008: record every decision with its deciding rule.
+    if audit
+        .record(
+            &now.to_rfc3339(),
+            &verified.authorization_id,
+            &host,
+            "GET",
+            &decision,
+        )
+        .is_err()
+    {
+        // Fail closed: a security audit that can't be written must not proceed.
+        eprintln!("multiscan: scan web: could not write the authorization audit log; refusing");
+        return Ok(Exit::AuthDenied);
+    }
+    if !decision.is_allowed() {
+        eprintln!("multiscan: scan web: {}", decision.rule());
+        return Ok(Exit::AuthDenied);
+    }
+
+    if !args.quiet {
+        eprintln!(
+            "multiscan: scan web {url}: authorization {} verified; {host} is in scope",
+            verified.authorization_id
+        );
+        eprintln!(
+            "multiscan: note: template probing is not implemented yet (lands in T-502); \
+             no requests were sent"
+        );
+    }
+    println!("No findings.");
+    Ok(Exit::Clean)
+}
+
+/// Extract the host from a URL for scope checking (no external URL crate).
+fn target_host(url: &str) -> Option<String> {
+    let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let authority = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(after_scheme);
+    // Strip userinfo and port.
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let host = host.split(':').next().unwrap_or(host);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_ascii_lowercase())
+    }
+}
+
+fn parse_hex32(hex: &str) -> Option<[u8; 32]> {
+    let hex = hex.trim();
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some(out)
+}
+
 /// `multiscan scan image <ref>` — pull the image (digest-verified), extract its
 /// layers into a confined temp root (SCA-005), resolve OS packages against the
 /// pinned OSV snapshot, and emit `ContainerVulnerability` findings (FR-002).
@@ -340,18 +464,7 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
     // Remote targets first: authorization is a hard gate (SEC-001, NG-5).
     match &args.target {
         Some(ScanTarget::Web { url }) => {
-            if args.authorization.is_none() {
-                // Exit 4 before any packet is sent (FR-007). No packet-sending
-                // code even exists on this path yet — T-501/T-502.
-                eprintln!(
-                    "multiscan: scan web {url}: refusing to probe without --authorization \
-                     (SEC-001); no request was sent"
-                );
-                return Ok(Exit::AuthDenied);
-            }
-            return Ok(usage(
-                "scan web is not implemented yet (lands in T-501/T-502)",
-            ));
+            return scan_web(url, args);
         }
         Some(ScanTarget::Image { reference }) => {
             return scan_image(reference, args);

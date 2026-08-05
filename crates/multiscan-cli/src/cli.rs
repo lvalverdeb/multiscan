@@ -119,8 +119,14 @@ pub struct ScanArgs {
     pub config: Option<PathBuf>,
 
     /// ScopeAuthorization file; required for `scan web` (SEC-001).
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub authorization: Option<PathBuf>,
+
+    /// Trusted ed25519 public key (hex) the authorization signature must
+    /// verify against. Absent ⇒ the authorization cannot be authenticated and
+    /// `scan web` is denied (conservative; §17 open question on key mgmt).
+    #[arg(long, global = true)]
+    pub authorization_key: Option<String>,
 
     /// Engine parallelism (default: logical CPUs).
     #[arg(long)]
