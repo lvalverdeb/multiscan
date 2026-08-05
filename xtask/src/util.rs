@@ -19,7 +19,7 @@ pub fn binary_path() -> PathBuf {
 
 /// Build the CLI binary so harnesses always test current code.
 pub fn ensure_binary() -> Result<()> {
-    run("cargo", &["build", "-p", "multiscan-cli"])
+    run("cargo", &["build", "-p", "multiscan"])
 }
 
 /// A fresh empty scratch directory under target/ (recreated each call).

@@ -14,7 +14,7 @@ const MAX_BINARY_BYTES: u64 = 30 * 1024 * 1024;
 
 pub fn run() -> Result<()> {
     // Build the release binary with the workspace release profile (LTO + strip).
-    util::run("cargo", &["build", "--release", "-p", "multiscan-cli"])?;
+    util::run("cargo", &["build", "--release", "-p", "multiscan"])?;
 
     let binary: PathBuf = util::workspace_root().join("target/release/multiscan");
     let size = std::fs::metadata(&binary)

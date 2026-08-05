@@ -11,7 +11,7 @@
 #   make release TO=x.y.z  # bump → check → tag, in one step
 #   make publish-dry   # dry-run each crate (see the note below)
 #   make publish       # publish every crate to crates.io, in order
-#   make publish-<crate-suffix>   # e.g. make publish-core, make publish-cli
+#   make publish-<crate>   # e.g. make publish-multiscan-core, make publish-multiscan
 #
 # Requirements before `make publish`:
 #   - `cargo login` (or CARGO_REGISTRY_TOKEN in the environment)
@@ -25,25 +25,25 @@
 # their dependencies go live. The real `make publish` avoids this entirely by
 # publishing in dependency order and waiting for each crate to index.
 
-# Topological publish order (crate-name suffixes). Do not reorder without
+# Topological publish order (full crate names). Do not reorder without
 # re-checking the dep graph: core → (crates depending only on core) →
-# (engines) → cli.
+# (engines) → the multiscan binary crate last.
 CRATES := \
-	core \
-	engine \
-	dedup \
-	risk \
-	feeds \
-	store \
-	report \
-	scope \
-	sca \
-	secrets \
-	iac \
-	bridge \
-	sast \
-	probe \
-	cli
+	multiscan-core \
+	multiscan-engine \
+	multiscan-dedup \
+	multiscan-risk \
+	multiscan-feeds \
+	multiscan-store \
+	multiscan-report \
+	multiscan-scope \
+	multiscan-sca \
+	multiscan-secrets \
+	multiscan-iac \
+	multiscan-bridge \
+	multiscan-sast \
+	multiscan-probe \
+	multiscan
 
 # Extra flags passed to every `cargo publish` (e.g. PUBLISH_FLAGS=--allow-dirty).
 PUBLISH_FLAGS ?=
@@ -67,7 +67,7 @@ check:
 
 ## Release build of the CLI.
 build:
-	cargo build --release -p multiscan-cli
+	cargo build --release -p multiscan
 
 ## Bump the workspace version. Usage: make bump TO=0.2.0
 ## Updates [workspace.package] and every internal path-dep version (they must
@@ -108,14 +108,14 @@ release:
 publish-dry: $(addprefix dry-,$(CRATES))
 
 $(addprefix dry-,$(CRATES)): dry-%:
-	cargo publish -p multiscan-$* --locked --dry-run $(PUBLISH_FLAGS)
+	cargo publish -p $* --locked --dry-run $(PUBLISH_FLAGS)
 
 ## Publish every crate to crates.io, in dependency order.
 ## cargo waits for each crate to land in the index before the next resolves it.
 publish: $(addprefix publish-,$(CRATES))
 
 $(addprefix publish-,$(CRATES)): publish-%:
-	cargo publish -p multiscan-$* --locked $(PUBLISH_FLAGS)
+	cargo publish -p $* --locked $(PUBLISH_FLAGS)
 
 clean:
 	cargo clean

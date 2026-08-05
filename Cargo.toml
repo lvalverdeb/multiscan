@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/multiscan-cli",
+    "crates/multiscan",
     "crates/multiscan-core",
     "crates/multiscan-engine",
     "crates/multiscan-scope",
@@ -20,7 +20,7 @@ members = [
 ]
 # xtask is excluded so `cargo build/test` never compiles dev tooling into the product.
 default-members = [
-    "crates/multiscan-cli",
+    "crates/multiscan",
     "crates/multiscan-core",
     "crates/multiscan-engine",
     "crates/multiscan-scope",

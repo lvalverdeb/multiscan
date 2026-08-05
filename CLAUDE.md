@@ -71,7 +71,7 @@ This isn't pedantry — the tool exists because five scanners use five vocabular
 
 ```
 crates/
-  multiscan-cli/       clap, config resolution, rendering, exit codes. Keep thin.
+  multiscan/           the binary crate: clap, config resolution, rendering, exit codes. Keep thin. (named `multiscan`, not `multiscan-cli` — ADR 0003)
   multiscan-core/      Finding, Asset, Severity, IDs. Generated. NO I/O.
   multiscan-engine/    Engine trait, manifests, FindingSink, registry.
   multiscan-scope/     Authorization, DNS re-check, rate control.   ← highest-scrutiny crate
@@ -133,7 +133,7 @@ cargo xtask bench        # NFR-001..005 gates
 
 ## Rust conventions
 
-- **Errors:** `thiserror` for library crates with typed variants; `anyhow` only in `multiscan-cli`. Engines return `EngineError`, never `Box<dyn Error>`.
+- **Errors:** `thiserror` for library crates with typed variants; `anyhow` only in the `multiscan` binary crate. Engines return `EngineError`, never `Box<dyn Error>`.
 - **No `unwrap`/`expect`/`panic!` outside tests, `xtask`, and `main`.** Clippy denies them in library crates. A malformed lockfile in someone's repo must not abort the scan — it degrades to a warning and `EngineOutcome::Partial`.
 - **Cancellation:** every engine checks `ctx.cancel` between units of work and honours `ctx.deadline`. Ctrl-C must produce partial results, not a hang.
 - **Allocation:** stream through `FindingSink`; never collect a whole result set in an engine. `NFR-003` is 500 MB on a 1 GB repo.

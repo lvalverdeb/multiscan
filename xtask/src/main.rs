@@ -83,7 +83,7 @@ fn safety() -> Result<()> {
         &[
             "test",
             "-p",
-            "multiscan-cli",
+            "multiscan",
             "--test",
             "cli",
             "web_scan_without_authorization_denied",

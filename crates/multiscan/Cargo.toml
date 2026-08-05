@@ -1,14 +1,10 @@
 [package]
-name = "multiscan-cli"
-description = "MultiScan command-line interface: argument parsing, config resolution, rendering, exit codes."
+name = "multiscan"
+description = "Unified security scanning in a single static binary: SCA, secrets, IaC, and authorized web probes, deduplicated and risk-ranked."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-
-[[bin]]
-name = "multiscan"
-path = "src/main.rs"
 
 [dependencies]
 multiscan-core.workspace = true

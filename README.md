@@ -116,7 +116,7 @@ Suppressions require a justification, an approver, and an expiry — permanent s
 
 ```
 crates/
-  multiscan-cli/       Binary: clap, config resolution, rendering, exit codes
+  multiscan/           Binary: clap, config resolution, rendering, exit codes
   multiscan-core/      Finding, Asset, Severity, IDs — generated from schemas/, no I/O
   multiscan-engine/    Engine trait, manifests, FindingSink, registry
   multiscan-scope/     Authorization, DNS re-check, rate control

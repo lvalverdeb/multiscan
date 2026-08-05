@@ -1187,20 +1187,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "multiscan-bridge"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "multiscan-core",
- "multiscan-dedup",
- "multiscan-report",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "multiscan-cli"
+name = "multiscan"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1231,6 +1218,19 @@ dependencies = [
  "tempfile",
  "toml",
  "ureq",
+]
+
+[[package]]
+name = "multiscan-bridge"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "multiscan-core",
+ "multiscan-dedup",
+ "multiscan-report",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
