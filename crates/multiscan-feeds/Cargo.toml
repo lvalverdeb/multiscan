@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-feeds"
+description = "OSV/EPSS/KEV feed cache, snapshot pinning, air-gap bundles (spec 10)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

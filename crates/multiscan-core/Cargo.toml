@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-core"
+description = "Core generated types: Finding, Asset, Severity, Confidence, IDs. Pure — no I/O (spec 5.2)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

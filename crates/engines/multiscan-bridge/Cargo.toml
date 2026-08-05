@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-bridge"
+description = "Bridges: external scanner output importers (spec 7.6)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

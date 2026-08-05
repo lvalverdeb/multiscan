@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-store"
+description = "Store trait and SQLite implementation: baselines, history, suppressions (spec 11)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

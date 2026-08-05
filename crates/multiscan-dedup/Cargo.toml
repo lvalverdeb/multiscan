@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-dedup"
+description = "finding_id construction and Finding merge. Pure — no I/O (spec 7.7)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

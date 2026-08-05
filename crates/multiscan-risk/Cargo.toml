@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-risk"
+description = "Risk scoring formula and explanations. Pure — no I/O (spec 8)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

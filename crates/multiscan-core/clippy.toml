@@ -1,0 +1,28 @@
+msrv = "1.78"
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+
+# NOTE: this file REPLACES the workspace-root clippy.toml for this crate (clippy
+# config does not merge), so the DET-001 bans are repeated here alongside the
+# pure-crate I/O bans (spec 5.2, DET-004).
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "DET-001: use BTreeMap or IndexMap" },
+    { path = "std::collections::HashSet", reason = "DET-001: use BTreeSet or IndexSet" },
+    { path = "std::fs::File", reason = "spec 5.2: pure crate — no filesystem access" },
+    { path = "std::net::TcpStream", reason = "spec 5.2: pure crate — no network access" },
+    { path = "std::net::UdpSocket", reason = "spec 5.2: pure crate — no network access" },
+    { path = "std::time::SystemTime", reason = "DET-004: time is injected via ScanContext" },
+    { path = "std::time::Instant", reason = "DET-004: time is injected via ScanContext" },
+]
+disallowed-methods = [
+    { path = "std::fs::read", reason = "spec 5.2: pure crate — no filesystem access" },
+    { path = "std::fs::read_to_string", reason = "spec 5.2: pure crate — no filesystem access" },
+    { path = "std::fs::write", reason = "spec 5.2: pure crate — no filesystem access" },
+    { path = "std::fs::copy", reason = "spec 5.2: pure crate — no filesystem access" },
+    { path = "std::env::var", reason = "DET-006: environment must not affect output" },
+    { path = "std::env::var_os", reason = "DET-006: environment must not affect output" },
+    { path = "std::env::vars", reason = "DET-006: environment must not affect output" },
+    { path = "chrono::Utc::now", reason = "DET-004: time is injected via ScanContext" },
+    { path = "chrono::Local::now", reason = "DET-004/DET-006: no wall clock, no local timezone" },
+]

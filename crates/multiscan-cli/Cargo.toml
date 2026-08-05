@@ -1,0 +1,16 @@
+[package]
+name = "multiscan-cli"
+description = "MultiScan command-line interface: argument parsing, config resolution, rendering, exit codes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "multiscan"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

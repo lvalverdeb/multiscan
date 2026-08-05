@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-secrets"
+description = "Secrets engine: regex, entropy, truncated fingerprints (spec 7.2)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

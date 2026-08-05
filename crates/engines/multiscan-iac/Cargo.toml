@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-iac"
+description = "IaC engine: HCL/YAML/JSON normalization and policy evaluation (spec 7.3)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

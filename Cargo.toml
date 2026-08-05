@@ -1,0 +1,99 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/multiscan-cli",
+    "crates/multiscan-core",
+    "crates/multiscan-engine",
+    "crates/multiscan-scope",
+    "crates/multiscan-feeds",
+    "crates/multiscan-dedup",
+    "crates/multiscan-risk",
+    "crates/multiscan-store",
+    "crates/multiscan-report",
+    "crates/engines/multiscan-sca",
+    "crates/engines/multiscan-secrets",
+    "crates/engines/multiscan-iac",
+    "crates/engines/multiscan-probe",
+    "crates/engines/multiscan-sast",
+    "crates/engines/multiscan-bridge",
+    "xtask",
+]
+# xtask is excluded so `cargo build/test` never compiles dev tooling into the product.
+default-members = [
+    "crates/multiscan-cli",
+    "crates/multiscan-core",
+    "crates/multiscan-engine",
+    "crates/multiscan-scope",
+    "crates/multiscan-feeds",
+    "crates/multiscan-dedup",
+    "crates/multiscan-risk",
+    "crates/multiscan-store",
+    "crates/multiscan-report",
+    "crates/engines/multiscan-sca",
+    "crates/engines/multiscan-secrets",
+    "crates/engines/multiscan-iac",
+    "crates/engines/multiscan-probe",
+    "crates/engines/multiscan-sast",
+    "crates/engines/multiscan-bridge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+
+[workspace.dependencies]
+# Internal crates — path deps, single declaration point (no per-crate version drift).
+multiscan-core = { path = "crates/multiscan-core" }
+multiscan-engine = { path = "crates/multiscan-engine" }
+multiscan-scope = { path = "crates/multiscan-scope" }
+multiscan-feeds = { path = "crates/multiscan-feeds" }
+multiscan-dedup = { path = "crates/multiscan-dedup" }
+multiscan-risk = { path = "crates/multiscan-risk" }
+multiscan-store = { path = "crates/multiscan-store" }
+multiscan-report = { path = "crates/multiscan-report" }
+multiscan-sca = { path = "crates/engines/multiscan-sca" }
+multiscan-secrets = { path = "crates/engines/multiscan-secrets" }
+multiscan-iac = { path = "crates/engines/multiscan-iac" }
+multiscan-probe = { path = "crates/engines/multiscan-probe" }
+multiscan-sast = { path = "crates/engines/multiscan-sast" }
+multiscan-bridge = { path = "crates/engines/multiscan-bridge" }
+
+# External
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+blake3 = "1"
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+rayon = "1"
+indexmap = { version = "2", features = ["serde"] }
+toml = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+
+# Dev/test
+proptest = "1"
+tempfile = "3"
+
+[workspace.lints.rust]
+# NFR-009: zero unsafe in first-party code. Workspace-level forbid, inherited by
+# every member via `[lints] workspace = true` (verified by `cargo xtask purity`).
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# No unwrap/expect/panic outside tests, xtask, and main (CLAUDE.md conventions).
+# Test allowances live in clippy.toml; xtask carries crate-level allows.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+# DET-001 (HashMap ban) and the pure-crate I/O bans; type/method lists in clippy.toml.
+disallowed_types = "deny"
+disallowed_methods = "deny"
+
+[profile.release]
+# NFR-004: <30 MB stripped binary.
+lto = true
+codegen-units = 1
+strip = true

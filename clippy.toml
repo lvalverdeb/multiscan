@@ -1,0 +1,14 @@
+msrv = "1.78"
+
+# CLAUDE.md: unwrap/expect/panic are allowed in tests.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+
+# DET-001: HashMap/HashSet iteration order is randomized per process and MUST NOT
+# reach output. Banned workspace-wide; a justified local #[allow] with a comment is
+# the escape hatch for genuinely order-free uses (counted by `cargo xtask purity`).
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "DET-001: use BTreeMap or IndexMap" },
+    { path = "std::collections::HashSet", reason = "DET-001: use BTreeSet or IndexSet" },
+]

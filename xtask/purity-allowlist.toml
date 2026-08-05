@@ -1,0 +1,17 @@
+# Transitive normal-dependency allowlist for the pure crates (spec 5.2).
+# `cargo xtask purity` fails if any of these crates gains a dependency not
+# listed here. Every addition is a reviewable event — think before you allow:
+# nothing here may perform I/O, read clocks, or touch the environment on the
+# pure crates' behalf.
+#
+# Workspace-internal deps are not listed; pure crates may depend only on other
+# pure crates (enforced separately).
+
+[multiscan-core]
+allow = []
+
+[multiscan-dedup]
+allow = []
+
+[multiscan-risk]
+allow = []

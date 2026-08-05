@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-sast"
+description = "SAST scaffold: structural_hash only in v1, no rules (spec 7.5, NG-2)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

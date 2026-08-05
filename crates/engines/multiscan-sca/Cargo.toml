@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-sca"
+description = "SCA engine: lockfiles and OS packages to purl to OSV resolution (spec 7.1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

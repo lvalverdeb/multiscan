@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-report"
+description = "Renderers: table, json, jsonl, sarif, sbom, markdown (spec 12)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

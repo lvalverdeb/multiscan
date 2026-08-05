@@ -1,0 +1,12 @@
+[package]
+name = "multiscan-scope"
+description = "ScopeAuthorization parsing and verification, target resolution guard, rate control (spec 9)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

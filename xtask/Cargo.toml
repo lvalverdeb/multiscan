@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+description = "MultiScan developer task runner: gen, golden, determinism, safety, offline, bench, purity, ci."
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+toml.workspace = true
+cargo_metadata = "0.20"
+
+[lints]
+workspace = true
