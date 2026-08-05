@@ -150,6 +150,11 @@ pub struct ScanArgs {
     /// Stateless scan: do not read or write the findings database (STO-003).
     #[arg(long)]
     pub no_store: bool,
+
+    /// Ingest an external scanner report (SARIF/Trivy/Semgrep/Checkov/ZAP) into
+    /// the same dedup pass as native findings (BRG-001). Repeatable.
+    #[arg(long = "import", value_name = "FILE")]
+    pub import: Vec<PathBuf>,
 }
 
 /// Remote scan targets.

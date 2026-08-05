@@ -105,6 +105,46 @@ fn load_baseline_ids(
     Ok(Some(findings.into_iter().map(|f| f.finding_id.0).collect()))
 }
 
+/// Read an external report and convert its Findings into `Attributed` raw
+/// findings so they join the native dedup pass (BRG-001). The engine_id comes
+/// from the imported finding's own source (`external:{tool}`).
+fn import_attributed(file: &std::path::Path) -> Result<Vec<Attributed>, String> {
+    let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
+    let findings = multiscan_bridge::import(&bytes).map_err(|e| e.to_string())?;
+    Ok(findings
+        .into_iter()
+        .map(|f| {
+            let engine_id = f
+                .sources
+                .first()
+                .map(|s| s.engine_id.clone())
+                .unwrap_or_else(|| "external:unknown".to_string());
+            Attributed {
+                engine_id,
+                raw: to_raw_finding(f),
+            }
+        })
+        .collect())
+}
+
+/// Project a fully-formed Finding back down to the `RawFinding` an engine would
+/// have emitted, so imports and native emissions dedup identically.
+fn to_raw_finding(f: Finding) -> multiscan_core::RawFinding {
+    multiscan_core::RawFinding {
+        identity: f.identity,
+        title: f.title,
+        description: f.description,
+        severity: f.severity,
+        confidence: f.confidence,
+        asset: f.asset,
+        location: f.location,
+        evidence: f.evidence,
+        rule_id: f.sources.first().and_then(|s| s.rule_id.clone()),
+        remediation: f.remediation,
+        cwe: f.cwe,
+    }
+}
+
 /// Persist findings to `.multiscan/multiscan.db` under the scan root (STO-001).
 /// Best-effort: a store error never fails the scan (STO-003 keeps state
 /// optional), it degrades to a stderr warning.
@@ -428,6 +468,21 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
                 engine_id: run.engine_id.clone(),
                 raw,
             });
+        }
+    }
+
+    // Ingest external reports into the SAME dedup pass as native findings
+    // (BRG-001): a Trivy/SARIF/... report of the same weakness merges with the
+    // native finding, escalating confidence (FR-004, 7.7.5).
+    for file in &args.import {
+        match import_attributed(file) {
+            Ok(mut imported) => attributed.append(&mut imported),
+            Err(err) => {
+                scan_degraded = true;
+                if !args.quiet {
+                    eprintln!("multiscan: warning: import {}: {err}", file.display());
+                }
+            }
         }
     }
 
