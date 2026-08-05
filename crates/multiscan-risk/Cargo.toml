@@ -7,6 +7,10 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+multiscan-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

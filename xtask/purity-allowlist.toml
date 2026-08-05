@@ -50,5 +50,18 @@ allow = [
     "unicode-ident",
 ]
 
+# serde closure inherited via multiscan-core only.
 [multiscan-risk]
-allow = []
+allow = [
+    "serde",
+    "serde_core",
+    "serde_derive",
+    "serde_json",
+    "itoa",
+    "memchr",
+    "zmij",
+    "proc-macro2",
+    "quote",
+    "syn",
+    "unicode-ident",
+]

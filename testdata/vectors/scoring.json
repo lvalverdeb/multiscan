@@ -1,0 +1,35 @@
+{
+  "comment": "Golden scoring vectors (FR-008): expected risk_score to ±0.1 under formula_version 1. Factor derivations and documented defaults live in multiscan-risk/src/lib.rs. Changing expected values requires a formula_version bump and a migration note (RSK-004).",
+  "vectors": [
+    {
+      "name": "kev_critical_proven_internet_reachable_critical_sensitive_clamps_to_100",
+      "inputs": { "severity": "critical", "confidence": "proven", "exposure": "internet_reachable", "exploit": "kev", "asset_criticality": "critical", "data_classification": "sensitive", "feed_snapshot_id": "osv-2026-08-05" },
+      "expected": { "risk_score": 100.0, "defaults_applied": [] }
+    },
+    {
+      "name": "medium_heuristic_epss_mid_band_no_context",
+      "inputs": { "severity": "medium", "confidence": "heuristic", "exposure": "unknown", "exploit": { "epss": 0.3 }, "feed_snapshot_id": "osv-2026-08-05" },
+      "expected": { "risk_score": 17.15, "defaults_applied": ["asset_criticality", "exposure"] }
+    },
+    {
+      "name": "informational_unconfirmed_everything_defaulted",
+      "inputs": { "severity": "informational", "confidence": "unconfirmed", "exposure": "unknown", "exploit": "unavailable" },
+      "expected": { "risk_score": 0.875, "defaults_applied": ["asset_criticality", "exploitability", "exposure"] }
+    },
+    {
+      "name": "cvss_overrides_low_ordinal",
+      "inputs": { "severity": "low", "cvss_base": 9.8, "confidence": "corroborated", "exposure": "unknown", "exploit": { "epss": 0.6 }, "asset_criticality": "low", "data_classification": "public", "feed_snapshot_id": "osv-2026-08-05" },
+      "expected": { "risk_score": 26.24, "defaults_applied": ["exposure"] }
+    },
+    {
+      "name": "no_cve_probe_finding_high_regulated",
+      "inputs": { "severity": "high", "confidence": "proven", "exposure": "internet_reachable", "exploit": "no_cve", "asset_criticality": "high", "data_classification": "regulated" },
+      "expected": { "risk_score": 49.5, "defaults_applied": [] }
+    },
+    {
+      "name": "critical_low_epss_band_medium_sensitive",
+      "inputs": { "severity": "critical", "confidence": "corroborated", "exposure": "unknown", "exploit": { "epss": 0.05 }, "asset_criticality": "medium", "data_classification": "sensitive", "feed_snapshot_id": "osv-2026-08-05" },
+      "expected": { "risk_score": 29.45, "defaults_applied": ["exposure"] }
+    }
+  ]
+}

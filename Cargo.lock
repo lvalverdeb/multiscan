@@ -570,6 +570,10 @@ version = "0.1.0"
 [[package]]
 name = "multiscan-risk"
 version = "0.1.0"
+dependencies = [
+ "multiscan-core",
+ "serde_json",
+]
 
 [[package]]
 name = "multiscan-sast"
