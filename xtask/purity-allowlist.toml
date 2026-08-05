@@ -25,8 +25,30 @@ allow = [
     "unicode-ident",
 ]
 
+# blake3 for finding_id (spec 7.7.1) plus its SIMD/cpu-detection closure
+# (cpufeatures/libc do CPU feature probing only), and the serde closure
+# inherited via multiscan-core.
 [multiscan-dedup]
-allow = []
+allow = [
+    "blake3",
+    "arrayref",
+    "arrayvec",
+    "cfg-if",
+    "constant_time_eq",
+    "cpufeatures",
+    "libc",
+    "serde",
+    "serde_core",
+    "serde_derive",
+    "serde_json",
+    "itoa",
+    "memchr",
+    "zmij",
+    "proc-macro2",
+    "quote",
+    "syn",
+    "unicode-ident",
+]
 
 [multiscan-risk]
 allow = []

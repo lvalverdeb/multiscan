@@ -1,0 +1,29 @@
+{
+  "comment": "Golden finding_id vectors (spec 7.7.1, encoding multiscan:finding_id:v1). A change to any value here invalidates every user's baselines and history — it is a breaking event requiring an ADR, never a casual re-bless.",
+  "vectors": [
+    {
+      "identity": { "finding_class": "vulnerable_dependency", "purl": "pkg:npm/lodash@4.17.20", "advisory_id": "GHSA-35jh-r3h4-6jhm", "manifest_path": "package-lock.json" },
+      "finding_id": "f98eac46389e43933693f912ced40cd94e3508ea7533f96aa81597cc15d51413"
+    },
+    {
+      "identity": { "finding_class": "container_vulnerability", "purl": "pkg:deb/debian/openssl@1.1.1n-0", "advisory_id": "OSV-2022-1", "image_digest": "sha256:0011aabb" },
+      "finding_id": "09b9c262a4510f078c77b5ffa3fd572fe67d7881be8cc7acd39a1b04d4855d9c"
+    },
+    {
+      "identity": { "finding_class": "exposed_secret", "rule_id": "aws-access-key", "path": "src/config/.env", "fingerprint": "AKIA****54ef" },
+      "finding_id": "8849be236912d29dbbd1b70e62ab440a94ccfae0c0d242aec1f18edc0ca2420c"
+    },
+    {
+      "identity": { "finding_class": "iac_misconfiguration", "policy_id": "CIS-AWS-2.1.1", "path": "infra/main.tf", "resource_address": "aws_s3_bucket.public_data" },
+      "finding_id": "3542bf96c2eb6dd8e2a019fea2784b84415319677d52d453a101f14306b8a039"
+    },
+    {
+      "identity": { "finding_class": "web_exposure", "template_id": "exposed-env-file", "origin": "https://staging.example.com:443", "request_path": "/.env" },
+      "finding_id": "9ac47874dfbbdf9cda6079f305d0a65bc920741d87748b11a04a735ffe541bfb"
+    },
+    {
+      "identity": { "finding_class": "structural_pattern", "rule_id": "rust-unwrap-in-handler", "path": "src/api/handler.rs", "structural_hash": "b3:9f8e7d6c" },
+      "finding_id": "4798ca4c90891fdf0fd2b128db3d5f8d72ccb5c6447ebf7bca8c8bc3d330715d"
+    }
+  ]
+}
