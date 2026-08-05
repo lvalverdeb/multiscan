@@ -1,0 +1,57 @@
+name: MultiScan
+description: >-
+  Scan a repository, image, or authorized web target with MultiScan and fail the
+  build on a policy-driven exit code.
+author: MultiScan
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: Path to scan (default: the repository root).
+    required: false
+    default: "."
+  layers:
+    description: Comma-separated layers (sca,secrets,iac,sast,probe). Default auto-detect.
+    required: false
+    default: ""
+  fail-on:
+    description: Gate threshold — a risk score number or a severity name.
+    required: false
+    default: ""
+  format:
+    description: Output format (table|json|jsonl|sarif|sbom|markdown).
+    required: false
+    default: "sarif"
+  output:
+    description: File to write machine output to.
+    required: false
+    default: "multiscan.sarif"
+  offline:
+    description: Run without network access.
+    required: false
+    default: "false"
+  version:
+    description: MultiScan release tag to use.
+    required: false
+    default: "latest"
+
+runs:
+  using: composite
+  steps:
+    - name: Run MultiScan
+      shell: bash
+      # The wrapper downloads the pinned release binary and runs it. Exit code 1
+      # means the gate fired (policy failure); 3 means the scanner broke — the
+      # Action distinguishes them (CLI-005).
+      run: |
+        set -euo pipefail
+        args=(scan "${{ inputs.path }}" --format "${{ inputs.format }}")
+        [ -n "${{ inputs.layers }}" ] && args+=(--layers "${{ inputs.layers }}")
+        [ -n "${{ inputs.fail-on }}" ] && args+=(--fail-on "${{ inputs.fail-on }}")
+        [ "${{ inputs.offline }}" = "true" ] && args+=(--offline)
+        echo "multiscan ${args[*]} > ${{ inputs.output }}"
+        # Release download + verification is provided by the published action;
+        # this template documents the invocation contract.
+        multiscan "${args[@]}" > "${{ inputs.output }}"

@@ -68,6 +68,7 @@ thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
+clap_mangen = "0.2"
 rayon = "1"
 indexmap = { version = "2", features = ["serde"] }
 toml = "0.8"

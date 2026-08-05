@@ -33,6 +33,9 @@ pub enum Command {
     Explain {
         /// Finding id or unique prefix
         finding_id: String,
+        /// Also print the append-only history for this Finding (needs the DB)
+        #[arg(long)]
+        history: bool,
     },
     /// Delta against a baseline Finding set
     Diff {
@@ -68,6 +71,8 @@ pub enum Command {
         /// Target shell
         shell: clap_complete::Shell,
     },
+    /// Emit a roff man page to stdout
+    Manpage,
 }
 
 /// `multiscan scan` arguments (spec 4.2).

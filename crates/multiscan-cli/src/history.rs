@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use multiscan_core::Finding;
-use multiscan_store::{SqliteStore, Store, Suppression};
+use multiscan_core::{Finding, FindingId, IdentityKey};
+use multiscan_store::{FindingEventKind, SqliteStore, Store, Suppression};
 
 use crate::cli::SuppressCmd;
 use crate::exit::Exit;
@@ -180,6 +180,127 @@ pub fn import(file: &Path, format: multiscan_report::Format) -> Result<Exit> {
     };
     print!("{}", multiscan_report::render(format, &findings, &footer));
     Ok(Exit::Clean)
+}
+
+/// `multiscan explain <finding_id> [--history]` — full score breakdown,
+/// evidence, and remediation for one stored Finding (FR-016, RSK-005).
+pub fn explain(finding_id: &str, history: bool) -> Result<Exit> {
+    let store = match open_store() {
+        Ok(s) => s,
+        Err(exit) => return Ok(exit),
+    };
+    let findings = store.all_findings().unwrap_or_default();
+    // Accept a unique prefix so a table id-prefix is copy-pasteable (CLI-004).
+    let matches: Vec<&Finding> = findings
+        .iter()
+        .filter(|f| f.finding_id.0.starts_with(finding_id))
+        .collect();
+    let finding = match matches.as_slice() {
+        [one] => one,
+        [] => {
+            eprintln!("multiscan: no stored finding matches `{finding_id}` (run a scan first?)");
+            return Ok(Exit::Usage);
+        }
+        many => {
+            eprintln!(
+                "multiscan: `{finding_id}` is ambiguous ({} matches); use a longer prefix",
+                many.len()
+            );
+            return Ok(Exit::Usage);
+        }
+    };
+
+    print_explanation(finding);
+
+    if history {
+        println!();
+        println!("History");
+        let events = store
+            .history(&FindingId(finding.finding_id.0.clone()))
+            .unwrap_or_default();
+        if events.is_empty() {
+            println!("  (no recorded events)");
+        }
+        for event in events {
+            let desc = match event.kind {
+                FindingEventKind::FirstSeen { status } => format!("first seen ({status})"),
+                FindingEventKind::StatusChanged { from, to } => {
+                    format!("status {from} → {to}")
+                }
+                FindingEventKind::ScoreChanged { from, to } => {
+                    format!("score {from:.1} → {to:.1}")
+                }
+            };
+            println!("  {}  {desc}", event.at.to_rfc3339());
+        }
+    }
+
+    Ok(Exit::Clean)
+}
+
+fn print_explanation(f: &Finding) {
+    let rule = match &f.identity {
+        IdentityKey::VulnerableDependency { advisory_id, .. }
+        | IdentityKey::ContainerVulnerability { advisory_id, .. } => advisory_id.clone(),
+        IdentityKey::ExposedSecret { rule_id, .. }
+        | IdentityKey::StructuralPattern { rule_id, .. } => rule_id.clone(),
+        IdentityKey::IacMisconfiguration { policy_id, .. } => policy_id.clone(),
+        IdentityKey::WebExposure { template_id, .. } => template_id.clone(),
+    };
+    println!("{}", f.finding_id.0);
+    println!("  {}", f.title);
+    println!(
+        "  {:?} · risk {:.1} · confidence {:?} · status {:?}",
+        f.severity, f.risk_score, f.confidence, f.status
+    );
+    println!("  rule: {rule}");
+    println!("  location: {}", f.location.path);
+
+    // RSK-005: all five factors, the raw product, defaults applied, snapshot.
+    let e = &f.score_explanation;
+    println!();
+    println!("Score (formula {})", e.formula_version);
+    println!("  S severity_base       {:.3}", e.factors.severity_base);
+    println!("  E exposure            {:.3}", e.factors.exposure);
+    println!("  X exploitability      {:.3}", e.factors.exploitability);
+    println!("  C confidence          {:.3}", e.factors.confidence);
+    println!("  A asset_criticality   {:.3}", e.factors.asset_criticality);
+    println!("  ── raw product        {:.4}", e.raw_product);
+    println!("  → risk_score          {:.1}", f.risk_score);
+    if e.defaults_applied.is_empty() {
+        println!("  defaults applied: none");
+    } else {
+        println!("  defaults applied: {}", e.defaults_applied.join(", "));
+    }
+    println!(
+        "  feed snapshot: {}",
+        e.feed_snapshot_id.as_deref().unwrap_or("none")
+    );
+
+    if !f.evidence.is_empty() {
+        println!();
+        println!("Evidence");
+        for ev in &f.evidence {
+            println!("  [{}] {}", ev.kind, ev.summary);
+        }
+    }
+
+    println!();
+    println!("Remediation");
+    match &f.remediation {
+        Some(r) => {
+            if let Some(v) = &r.fixed_version {
+                println!("  fixed in: {v}");
+            }
+            if let Some(s) = &r.summary {
+                println!("  {s}");
+            }
+            if r.fixed_version.is_none() && r.summary.is_none() {
+                println!("  no fix available");
+            }
+        }
+        None => println!("  none recorded"),
+    }
 }
 
 fn parse_expiry(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {

@@ -33,6 +33,12 @@ fn run(parsed: Cli) -> anyhow::Result<Exit> {
             clap_complete::generate(shell, &mut command, "multiscan", &mut std::io::stdout());
             Ok(Exit::Clean)
         }
+        Command::Manpage => {
+            let man = clap_mangen::Man::new(Cli::command());
+            man.render(&mut std::io::stdout())
+                .map_err(|e| anyhow::anyhow!("rendering man page: {e}"))?;
+            Ok(Exit::Clean)
+        }
         Command::Import { file, format } => {
             let fmt = match format.as_deref() {
                 None => multiscan_report::Format::Table,
@@ -47,7 +53,10 @@ fn run(parsed: Cli) -> anyhow::Result<Exit> {
             history::import(&file, fmt)
         }
         Command::Report => not_yet("report", "T-301"),
-        Command::Explain { .. } => not_yet("explain", "T-603"),
+        Command::Explain {
+            finding_id,
+            history,
+        } => history::explain(&finding_id, history),
         Command::Diff { baseline } => history::diff(&baseline),
         Command::Suppress { action } => history::suppress(&action),
         Command::Db { action } => db::run(&action),
