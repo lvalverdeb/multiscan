@@ -18,6 +18,7 @@ multiscan-risk.workspace = true
 multiscan-report.workspace = true
 multiscan-feeds.workspace = true
 multiscan-sca.workspace = true
+multiscan-secrets.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true

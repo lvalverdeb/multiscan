@@ -7,6 +7,14 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+multiscan-core.workspace = true
+multiscan-engine.workspace = true
+blake3.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
