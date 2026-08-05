@@ -258,6 +258,9 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
     if ctx.layers.contains(&Layer::Secrets) {
         registry.register(Box::new(multiscan_secrets::SecretsEngine::new()));
     }
+    if ctx.layers.contains(&Layer::Iac) {
+        registry.register(Box::new(multiscan_iac::IacEngine::new()));
+    }
     if let Some(count) = args.testkit_fixture {
         if args.testkit_partial {
             registry.register(Box::new(FixtureEngine::partial(

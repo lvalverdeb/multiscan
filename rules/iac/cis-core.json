@@ -1,0 +1,56 @@
+{
+  "pack_id": "cis-core",
+  "version": "1.0.0",
+  "policies": [
+    {
+      "id": "cis-aws-s3-public-acl",
+      "title": "S3 bucket grants public access via ACL",
+      "resource_kinds": ["aws_s3_bucket"],
+      "severity": "high",
+      "cwe": ["CWE-284"],
+      "compliance_controls": ["CIS-AWS-2.1.5", "NIST-800-53-AC-3"],
+      "remediation": "Set the bucket ACL to private and enable S3 Block Public Access.",
+      "condition": { "op": "in", "attribute": "acl", "values": ["public-read", "public-read-write"] }
+    },
+    {
+      "id": "cis-aws-s3-no-encryption",
+      "title": "S3 bucket has no server-side encryption configured",
+      "resource_kinds": ["aws_s3_bucket"],
+      "severity": "medium",
+      "cwe": ["CWE-311"],
+      "compliance_controls": ["CIS-AWS-2.1.1"],
+      "remediation": "Add a server_side_encryption_configuration block enforcing AES256 or aws:kms.",
+      "condition": { "op": "absent", "attribute": "server_side_encryption_configuration" }
+    },
+    {
+      "id": "cis-aws-sg-open-ingress",
+      "title": "Security group allows ingress from 0.0.0.0/0",
+      "resource_kinds": ["aws_security_group"],
+      "severity": "high",
+      "cwe": ["CWE-284"],
+      "compliance_controls": ["CIS-AWS-5.2"],
+      "remediation": "Restrict ingress CIDR blocks to known networks.",
+      "condition": { "op": "contains", "attribute": "ingress.cidr_blocks", "value": "0.0.0.0/0" }
+    },
+    {
+      "id": "cis-aws-ebs-unencrypted",
+      "title": "EBS volume is not encrypted",
+      "resource_kinds": ["aws_ebs_volume"],
+      "severity": "medium",
+      "cwe": ["CWE-311"],
+      "compliance_controls": ["CIS-AWS-2.2.1"],
+      "remediation": "Set encrypted = true on the EBS volume.",
+      "condition": { "op": "is_false_or_absent", "attribute": "encrypted" }
+    },
+    {
+      "id": "cis-k8s-privileged-container",
+      "title": "Container runs in privileged mode",
+      "resource_kinds": ["Pod", "Deployment"],
+      "severity": "high",
+      "cwe": ["CWE-250"],
+      "compliance_controls": ["CIS-K8S-5.2.1"],
+      "remediation": "Set securityContext.privileged to false.",
+      "condition": { "op": "is_true", "attribute": "spec.securityContext.privileged" }
+    }
+  ]
+}
