@@ -47,6 +47,9 @@ pub fn run() -> Result<()> {
 
     let output = command
         .current_dir(&scratch)
+        // Isolate from any real feed cache; the scan must succeed offline with
+        // no snapshot for non-sca layers (FD-007).
+        .env("MULTISCAN_CACHE_DIR", scratch.join("empty-cache"))
         .output()
         .context("launching sandboxed scan")?;
     if output.status.code() != Some(0) {

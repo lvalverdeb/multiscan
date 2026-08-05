@@ -25,6 +25,9 @@ allow = [
     "Zlib",
     "CC0-1.0",
     "MPL-2.0",
+    # webpki-roots ships the Mozilla CA bundle (data, not code) under this
+    # permissive data license; arrives transitively via rustls (ureq TLS).
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]

@@ -32,6 +32,9 @@ pub fn run(bless: bool) -> Result<()> {
                 .env("TZ", "UTC")
                 .env("LC_ALL", "C")
                 .env("NO_COLOR", "1")
+                // Isolate from any real feed cache so golden output depends
+                // only on the code, never on machine state (FD-007).
+                .env("MULTISCAN_CACHE_DIR", scratch.join("empty-cache"))
                 .output()
                 .context("running multiscan")?;
             if !output.status.success() {

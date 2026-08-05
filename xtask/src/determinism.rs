@@ -57,6 +57,9 @@ pub fn run(runs: u32) -> Result<()> {
                         jobs,
                     ])
                     .envs(envs.iter().copied())
+                    // Isolate from any real feed cache (FD-007): determinism
+                    // must reflect the code, not machine state.
+                    .env("MULTISCAN_CACHE_DIR", root.join("empty-cache"))
                     .output()
                     .map_err(|e| format!("spawn failed: {e}"))?;
                 if output.status.code() != Some(0) {

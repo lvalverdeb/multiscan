@@ -72,6 +72,12 @@ indexmap = { version = "2", features = ["serde"] }
 toml = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 
+# Network (feeds + probe only; scan targets go through multiscan-scope, R-6).
+# ureq 3 = blocking + rustls/ring — no async runtime, no aws-lc build deps.
+ureq = "3"
+flate2 = "1"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+
 # Dev/test
 proptest = "1"
 tempfile = "3"

@@ -150,12 +150,97 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
             .build_global();
     }
 
+    // ---- Feed snapshot pinning and staleness (FD-002..004) ----
+    // A scan NEVER fetches (FD-003); it pins whatever `db update` cached.
+    let offline = args.offline
+        || config
+            .feeds
+            .as_ref()
+            .and_then(|f| f.offline)
+            .unwrap_or(false);
+    let max_age_raw = args
+        .max_feed_age
+        .clone()
+        .or_else(|| config.feeds.as_ref().and_then(|f| f.max_age.clone()))
+        .unwrap_or_else(|| "7d".to_string());
+    let max_age = match multiscan_feeds::parse_max_age(&max_age_raw) {
+        Ok(duration) => duration,
+        Err(err) => return Ok(usage(&format!("--max-feed-age: {err}"))),
+    };
+    // Feeds only gate scans that explicitly ask for the sca layer; secrets
+    // and iac must work with zero prior network access (FD-007). The
+    // auto-detect default does not count as an explicit sca request until
+    // real auto-detection lands with the sca engine (FR-001, T-202).
+    let sca_explicit = args
+        .layers
+        .as_ref()
+        .map(|l| l.iter().any(|s| s == "sca"))
+        .unwrap_or_else(|| {
+            config
+                .scan
+                .as_ref()
+                .map(|s| s.layers.contains(&Layer::Sca))
+                .unwrap_or(false)
+        });
+    let feed_snapshot_id = match multiscan_feeds::current_snapshot(&multiscan_feeds::cache_dir()) {
+        Ok(Some(snapshot)) => {
+            match multiscan_feeds::freshness(snapshot.manifest.as_of, chrono::Utc::now(), max_age) {
+                multiscan_feeds::Freshness::Fresh => Some(snapshot.manifest.snapshot_id),
+                multiscan_feeds::Freshness::Stale { age_hours } => {
+                    if offline {
+                        // FD-004: stale under --offline is a hard failure.
+                        eprintln!(
+                            "multiscan: error: feed snapshot {} is {age_hours}h old \
+                             (max {max_age_raw}) and --offline forbids updating (FD-004)",
+                            snapshot.manifest.snapshot_id
+                        );
+                        return Ok(Exit::FeedsStale);
+                    }
+                    if !args.quiet {
+                        eprintln!(
+                            "multiscan: warning: feed snapshot {} is {age_hours}h old \
+                             (max {max_age_raw}); run `multiscan db update`",
+                            snapshot.manifest.snapshot_id
+                        );
+                    }
+                    Some(snapshot.manifest.snapshot_id)
+                }
+            }
+        }
+        Ok(None) => {
+            if offline && sca_explicit {
+                eprintln!(
+                    "multiscan: error: --offline with the sca layer requires a feed \
+                     snapshot; run `multiscan db update` while online (FD-004, FD-007)"
+                );
+                return Ok(Exit::FeedsStale);
+            }
+            if !args.quiet {
+                eprintln!(
+                    "multiscan: warning: no feed snapshot; dependency enrichment \
+                     unavailable (run `multiscan db update`)"
+                );
+            }
+            None
+        }
+        Err(err) => {
+            if offline {
+                eprintln!("multiscan: error: feed cache is corrupt: {err}");
+                return Ok(Exit::FeedsStale);
+            }
+            if !args.quiet {
+                eprintln!("multiscan: warning: feed cache is corrupt, ignoring it: {err}");
+            }
+            None
+        }
+    };
+
     let ctx = ScanContext {
         root: args.path.clone(),
         config: config.clone(),
         profile,
         layers,
-        feed_snapshot_id: None,
+        feed_snapshot_id,
         authorization: None,
         cancel: Arc::new(AtomicBool::new(false)),
         deadline: None,
