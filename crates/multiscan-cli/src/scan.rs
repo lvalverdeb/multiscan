@@ -751,6 +751,10 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
     if ctx.layers.contains(&Layer::Iac) {
         registry.register(Box::new(multiscan_iac::IacEngine::new()));
     }
+    if ctx.layers.contains(&Layer::Sast) {
+        // v1 scaffold: registered but always NotApplicable (NG-2).
+        registry.register(Box::new(multiscan_sast::SastEngine::new()));
+    }
     if let Some(count) = args.testkit_fixture {
         if args.testkit_partial {
             registry.register(Box::new(FixtureEngine::partial(

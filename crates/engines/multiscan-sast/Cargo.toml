@@ -8,6 +8,9 @@ license.workspace = true
 publish = false
 
 [dependencies]
+multiscan-core.workspace = true
+multiscan-engine.workspace = true
+blake3.workspace = true
 
 [lints]
 workspace = true
