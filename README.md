@@ -40,7 +40,7 @@ MultiScan writes fast Rust executors but does not author vulnerability knowledge
 ## Quick start
 
 ```sh
-# Build (Rust ≥ 1.78)
+# Build (Rust ≥ 1.85)
 cargo build --release
 # → target/release/multiscan
 
@@ -63,6 +63,8 @@ multiscan db export bundle.msdb   # signed bundle for offline import
 ```
 
 Other commands: `import` (ingest external scanner output), `report` (re-render stored Findings), `explain <FINDING_ID>` (full score breakdown), `diff <BASELINE>`, `suppress add|list|expire`, `rules list|validate|pin`, `completions <SHELL>`.
+
+New to MultiScan? **[GETTING_STARTED.md](GETTING_STARTED.md)** walks from install to a gated CI scan, step by step.
 
 ## Exit codes
 
