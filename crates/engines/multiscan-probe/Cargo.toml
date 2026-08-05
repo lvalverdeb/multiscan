@@ -8,6 +8,24 @@ license.workspace = true
 publish = false
 
 [dependencies]
+multiscan-core.workspace = true
+multiscan-scope.workspace = true
+blake3.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml_ng.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+
+[dev-dependencies]
+multiscan-core.workspace = true
+multiscan-scope.workspace = true
+ed25519-dalek.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

@@ -1,0 +1,47 @@
+# Bundled probe templates (spec 7.4). Declarative data only: request + matcher
+# specs, no scripting (PRB-001). All requests are idempotent and body-less, so
+# they cannot write/delete/persist state on the target (PRB-004).
+- id: exposed-env-file
+  severity: high
+  cwe: [CWE-200]
+  description: Environment file with secrets exposed over HTTP
+  requests:
+    - method: GET
+      path: ["/.env", "/.env.local", "/.env.production"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: regex
+          part: body
+          patterns: ["(?m)^[A-Z_]+_(KEY|SECRET|TOKEN|PASSWORD)="]
+      matchers_condition: and
+
+- id: exposed-git-config
+  severity: medium
+  cwe: [CWE-538]
+  description: Exposed .git/config directory
+  requests:
+    - method: GET
+      path: ["/.git/config"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["[core]", "repositoryformatversion"]
+      matchers_condition: and
+
+- id: phpinfo-exposed
+  severity: medium
+  cwe: [CWE-200]
+  description: phpinfo() page exposed
+  requests:
+    - method: GET
+      path: ["/phpinfo.php", "/info.php"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["PHP Version", "phpinfo()"]
+      matchers_condition: and

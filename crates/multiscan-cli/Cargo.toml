@@ -24,6 +24,7 @@ multiscan-iac.workspace = true
 multiscan-store.workspace = true
 multiscan-bridge.workspace = true
 multiscan-scope.workspace = true
+multiscan-probe.workspace = true
 tempfile.workspace = true
 anyhow.workspace = true
 clap.workspace = true

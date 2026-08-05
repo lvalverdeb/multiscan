@@ -1204,6 +1204,7 @@ dependencies = [
  "multiscan-engine",
  "multiscan-feeds",
  "multiscan-iac",
+ "multiscan-probe",
  "multiscan-report",
  "multiscan-risk",
  "multiscan-sca",
@@ -1283,6 +1284,21 @@ dependencies = [
 [[package]]
 name = "multiscan-probe"
 version = "0.1.0"
+dependencies = [
+ "blake3",
+ "chrono",
+ "ed25519-dalek",
+ "multiscan-core",
+ "multiscan-scope",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tempfile",
+ "thiserror 2.0.19",
+ "toml",
+ "ureq",
+]
 
 [[package]]
 name = "multiscan-report"

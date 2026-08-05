@@ -182,11 +182,12 @@ pub fn scan_timestamp() -> String {
     }
 }
 
-/// `multiscan scan web <url>` — the authorization gate (SEC-001, spec 9). Runs
-/// the static gate (parse → signature → window → attestation → wildcard safety
-/// → host+method in scope) with zero network I/O; any failure exits 4 and the
-/// decision is written to the audit log (SEC-008). Actual template probing
-/// lands in T-502.
+/// `multiscan scan web <url>` — the authorization gate (SEC-001, spec 9) then
+/// declarative probing (spec 7.4). The static gate (parse → signature → window
+/// → attestation → wildcard safety → host+method in scope) runs with zero
+/// network I/O; any failure exits 4 and is written to the audit log (SEC-008).
+/// On success the bundled templates run over the scoped transport (every
+/// request re-checked, PRB-002; no out-of-scope redirects, SEC-005).
 fn scan_web(url: &str, args: &crate::cli::ScanArgs) -> Result<Exit> {
     use multiscan_scope::{AuditLog, Authorization, Decision};
 
@@ -268,13 +269,83 @@ fn scan_web(url: &str, args: &crate::cli::ScanArgs) -> Result<Exit> {
             "multiscan: scan web {url}: authorization {} verified; {host} is in scope",
             verified.authorization_id
         );
-        eprintln!(
-            "multiscan: note: template probing is not implemented yet (lands in T-502); \
-             no requests were sent"
-        );
     }
-    println!("No findings.");
+
+    // Execute the bundled declarative templates over the scoped transport.
+    let (scheme, port) = scheme_and_port(url);
+    let origin = format!("{scheme}://{host}:{port}");
+    let templates = match multiscan_probe::builtin_templates() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("multiscan: error: probe templates: {e}");
+            return Ok(Exit::ScanError);
+        }
+    };
+    let transport = multiscan_probe::ScopedTransport::new(&origin, &host, port);
+    let mut rate =
+        multiscan_scope::RateControl::for_rps(if profile == Profile::Quick { 5.0 } else { 25.0 });
+    let raw = multiscan_probe::execute(
+        &templates,
+        &multiscan_probe::ProbeRun {
+            authorization: &verified,
+            origin: origin.clone(),
+            host: host.clone(),
+            now: now.to_rfc3339(),
+        },
+        &transport,
+        &mut rate,
+        &audit,
+    );
+
+    // Score the web findings through the shared pipeline.
+    let format = match args.format.as_deref() {
+        None => Format::Table,
+        Some(name) => match Format::parse(name) {
+            Some(f) => f,
+            None => return Ok(usage(&format!("unknown format `{name}`"))),
+        },
+    };
+    let attributed: Vec<Attributed> = raw
+        .into_iter()
+        .map(|raw| Attributed {
+            engine_id: "multiscan.probe".to_string(),
+            raw,
+        })
+        .collect();
+    let merged = multiscan_dedup::merge(attributed);
+    let mut findings: Vec<Finding> = merged
+        .into_iter()
+        .map(|m| assemble_finding(m, &RiskContext::default(), None, None))
+        .collect();
+    sort_findings(&mut findings);
+
+    let footer = multiscan_report::Footer {
+        scanned_at: now.to_rfc3339(),
+        feed_snapshot_id: None,
+    };
+    print!("{}", render(format, &findings, &footer));
     Ok(Exit::Clean)
+}
+
+/// Scheme and default port from a URL.
+fn scheme_and_port(url: &str) -> (&str, u16) {
+    // Honour an explicit port if present in the authority.
+    let after = url.split_once("://").unwrap_or(("https", url));
+    let authority = after.1.split(['/', '?', '#']).next().unwrap_or(after.1);
+    let port = authority
+        .rsplit('@')
+        .next()
+        .and_then(|hostport| {
+            hostport
+                .rsplit(':')
+                .next()
+                .filter(|p| p.chars().all(|c| c.is_ascii_digit()))
+        })
+        .and_then(|p| p.parse::<u16>().ok());
+    match after.0 {
+        "http" => ("http", port.unwrap_or(80)),
+        _ => ("https", port.unwrap_or(443)),
+    }
 }
 
 /// Extract the host from a URL for scope checking (no external URL crate).
