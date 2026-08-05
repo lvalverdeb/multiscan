@@ -135,19 +135,120 @@ fn jsonl(findings: &[Finding]) -> String {
     out
 }
 
-/// Minimal CycloneDX 1.5 document (real dependency graph lands with T-304).
-/// `serialNumber` is deliberately omitted — it would be random, and machine
-/// output must be byte-deterministic (NFR-006).
-fn sbom(_findings: &[Finding]) -> String {
-    let doc = serde_json::json!({
+/// One SBOM component: a resolved package (spec 12). The CLI maps the SCA
+/// engine's resolved inventory into these; the report crate stays free of an
+/// SCA dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SbomComponent {
+    /// Package URL, also used as the CycloneDX `bom-ref`.
+    pub purl: String,
+    /// Package name.
+    pub name: String,
+    /// Resolved version, if pinned.
+    pub version: Option<String>,
+}
+
+/// CycloneDX severity label for a Severity.
+fn cyclonedx_severity(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Critical => "critical",
+        Severity::High => "high",
+        Severity::Medium => "medium",
+        Severity::Low => "low",
+        Severity::Informational => "info",
+    }
+}
+
+/// CycloneDX 1.5 SBOM from the resolved component inventory plus any
+/// `VulnerableDependency` findings (spec 12, OUT-001). Deterministic by
+/// construction: `serialNumber` and `metadata.timestamp` are omitted (they
+/// would be random / clock-derived and break NFR-006); components and
+/// vulnerabilities are sorted.
+pub fn render_sbom(components: &[SbomComponent], findings: &[Finding], _footer: &Footer) -> String {
+    let mut sorted: Vec<&SbomComponent> = components.iter().collect();
+    sorted.sort_by(|a, b| a.purl.cmp(&b.purl));
+    sorted.dedup_by(|a, b| a.purl == b.purl);
+
+    let component_json: Vec<serde_json::Value> = sorted
+        .iter()
+        .map(|c| {
+            let mut obj = serde_json::json!({
+                "type": "library",
+                "bom-ref": c.purl,
+                "name": c.name,
+                "purl": c.purl,
+            });
+            if let Some(version) = &c.version {
+                obj["version"] = serde_json::Value::String(version.clone());
+            }
+            obj
+        })
+        .collect();
+
+    // Vulnerabilities from dependency findings, keyed by advisory id → the
+    // affected component bom-ref (the package purl).
+    let mut vulns: Vec<serde_json::Value> = findings
+        .iter()
+        .filter_map(|f| match &f.identity {
+            IdentityKey::VulnerableDependency {
+                purl, advisory_id, ..
+            }
+            | IdentityKey::ContainerVulnerability {
+                purl, advisory_id, ..
+            } => Some((
+                advisory_id.clone(),
+                purl.clone(),
+                cyclonedx_severity(f.severity),
+            )),
+            _ => None,
+        })
+        .map(|(id, purl, severity)| {
+            serde_json::json!({
+                "id": id,
+                "ratings": [{ "severity": severity }],
+                "affects": [{ "ref": purl }],
+            })
+        })
+        .collect();
+    vulns.sort_by(|a, b| {
+        a["id"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["id"].as_str().unwrap_or(""))
+            .then_with(|| {
+                a["affects"][0]["ref"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["affects"][0]["ref"].as_str().unwrap_or(""))
+            })
+    });
+
+    let mut doc = serde_json::json!({
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",
         "version": 1,
-        "components": [],
+        "components": component_json,
     });
+    if !vulns.is_empty() {
+        doc["vulnerabilities"] = serde_json::Value::Array(vulns);
+    }
     let mut out = serde_json::to_string_pretty(&doc).unwrap_or_default();
     out.push('\n');
     out
+}
+
+/// SBOM with no external inventory — used by the generic `render()` entry
+/// point, which has only findings. The CLI calls [`render_sbom`] with the SCA
+/// inventory for a populated document.
+fn sbom(findings: &[Finding]) -> String {
+    render_sbom(
+        &[],
+        findings,
+        &Footer {
+            scanned_at: String::new(),
+            feed_snapshot_id: None,
+        },
+    )
 }
 
 fn id_prefix(finding: &Finding) -> &str {
@@ -382,6 +483,26 @@ mod tests {
                 "{format:?} leaked time"
             );
         }
+    }
+
+    /// render_sbom links a vulnerable finding to its component by purl.
+    #[test]
+    fn sbom_links_vulnerability_to_component() {
+        let components = vec![SbomComponent {
+            purl: "pkg:npm/lodash@4.17.20".into(),
+            name: "lodash".into(),
+            version: Some("4.17.20".into()),
+        }];
+        let out = render_sbom(&components, &[sample()], &footer());
+        let doc: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(doc["specVersion"], "1.5");
+        assert_eq!(doc["components"][0]["purl"], "pkg:npm/lodash@4.17.20");
+        assert_eq!(
+            doc["vulnerabilities"][0]["affects"][0]["ref"],
+            "pkg:npm/lodash@4.17.20"
+        );
+        // Deterministic: no random serialNumber / clock timestamp (NFR-006).
+        assert!(!out.contains("serialNumber"));
     }
 
     /// OUT-001: SARIF ruleId is the advisory id and partialFingerprints carries

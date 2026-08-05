@@ -79,6 +79,32 @@ impl Default for ScaEngine {
     }
 }
 
+/// Resolve the full package inventory under `root` — every package in every
+/// recognized lockfile, deduplicated by purl and sorted. This is the source
+/// for the CycloneDX SBOM (spec 12); it needs no OSV snapshot. Unparseable
+/// lockfiles are skipped rather than failing the inventory.
+pub fn resolve_inventory(root: &Path) -> Vec<ResolvedPackage> {
+    let mut by_purl: std::collections::BTreeMap<String, ResolvedPackage> =
+        std::collections::BTreeMap::new();
+    for (abs, _rel, name) in find_lockfiles(root) {
+        let Some(parse) = lockfile::parser_for(&name) else {
+            continue;
+        };
+        if std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0) > MAX_LOCKFILE_BYTES {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&abs) else {
+            continue;
+        };
+        if let Ok(packages) = parse(&text) {
+            for package in packages {
+                by_purl.insert(package.purl(), package);
+            }
+        }
+    }
+    by_purl.into_values().collect()
+}
+
 /// Find lockfiles under `root`, bounded and skipping heavy vendor dirs.
 /// Returns (absolute path, root-relative POSIX path, file name), sorted.
 fn find_lockfiles(root: &Path) -> Vec<(PathBuf, String, String)> {

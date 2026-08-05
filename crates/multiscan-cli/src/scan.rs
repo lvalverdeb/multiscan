@@ -531,7 +531,23 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         scanned_at: ctx.started_at.clone(),
         feed_snapshot_id: ctx.feed_snapshot_id.clone(),
     };
-    print!("{}", render(format, &displayed, &footer));
+    let output = if format == Format::Sbom {
+        // SBOM is a component inventory from the SCA resolved graph (spec 12),
+        // independent of which findings surfaced.
+        let components: Vec<multiscan_report::SbomComponent> =
+            multiscan_sca::resolve_inventory(&args.path)
+                .into_iter()
+                .map(|p| multiscan_report::SbomComponent {
+                    purl: p.purl(),
+                    name: p.name,
+                    version: p.version,
+                })
+                .collect();
+        multiscan_report::render_sbom(&components, &displayed, &footer)
+    } else {
+        render(format, &displayed, &footer)
+    };
+    print!("{}", output);
 
     Ok(if scan_degraded {
         Exit::ScanError
