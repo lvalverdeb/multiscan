@@ -29,6 +29,17 @@ fn usage(message: &str) -> Exit {
     Exit::Usage
 }
 
+/// The scan's wall-clock timestamp, RFC 3339. Honours `MULTISCAN_NOW` as an
+/// injected-clock override so golden and determinism tests can hold time
+/// constant (DET-004). It only ever reaches the human-format footer, never
+/// machine output, so it does not violate DET-006.
+fn scan_timestamp() -> String {
+    match std::env::var("MULTISCAN_NOW") {
+        Ok(value) if !value.is_empty() => value,
+        _ => chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    }
+}
+
 /// Entry point for `multiscan scan`.
 pub fn run(args: &ScanArgs) -> Result<Exit> {
     // Remote targets first: authorization is a hard gate (SEC-001, NG-5).
@@ -247,7 +258,7 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         authorization: None,
         cancel: Arc::new(AtomicBool::new(false)),
         deadline: None,
-        started_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        started_at: scan_timestamp(),
     };
 
     let mut registry = Registry::new();
@@ -370,8 +381,13 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         _ => findings,
     };
 
-    // The single stdout write (CLI-001).
-    print!("{}", render(format, &displayed));
+    // The single stdout write (CLI-001). The footer carries the scan
+    // timestamp for human formats only (OUT-002); machine formats ignore it.
+    let footer = multiscan_report::Footer {
+        scanned_at: ctx.started_at.clone(),
+        feed_snapshot_id: ctx.feed_snapshot_id.clone(),
+    };
+    print!("{}", render(format, &displayed, &footer));
 
     Ok(if scan_degraded {
         Exit::ScanError

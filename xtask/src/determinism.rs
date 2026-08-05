@@ -60,6 +60,9 @@ pub fn run(runs: u32) -> Result<()> {
                     // Isolate from any real feed cache (FD-007): determinism
                     // must reflect the code, not machine state.
                     .env("MULTISCAN_CACHE_DIR", root.join("empty-cache"))
+                    // Injected clock (DET-004): time is an input, held constant
+                    // so real nondeterminism is what the compare catches.
+                    .env("MULTISCAN_NOW", "2026-01-01T00:00:00Z")
                     .output()
                     .map_err(|e| format!("spawn failed: {e}"))?;
                 if output.status.code() != Some(0) {

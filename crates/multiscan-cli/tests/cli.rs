@@ -26,7 +26,10 @@ fn empty_scan_exits_clean() {
     let dir = tempfile::tempdir().unwrap();
     let out = multiscan(dir.path(), &["scan", "."]);
     assert_eq!(code(&out), 0);
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "No findings.\n");
+    // Body says no findings; a footer line carries the scan timestamp (OUT-002).
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("No findings.\n"));
+    assert!(stdout.contains("scanned at"));
 }
 
 #[test]

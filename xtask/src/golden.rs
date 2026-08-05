@@ -35,6 +35,8 @@ pub fn run(bless: bool) -> Result<()> {
                 // Isolate from any real feed cache so golden output depends
                 // only on the code, never on machine state (FD-007).
                 .env("MULTISCAN_CACHE_DIR", scratch.join("empty-cache"))
+                // Injected clock so the human-format footer is stable (OUT-002).
+                .env("MULTISCAN_NOW", "2026-01-01T00:00:00Z")
                 .output()
                 .context("running multiscan")?;
             if !output.status.success() {

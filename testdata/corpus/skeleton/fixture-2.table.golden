@@ -1,6 +1,7 @@
 HIGH (1)
-  2cf8b3c43661   20.2  TESTKIT-001  fixtures/resource-001.tf:1  -
+  2cf8b3c43661   20.2  iac         TESTKIT-001  fixtures/resource-001.tf:1  -
 MEDIUM (1)
-  0dd973766999   13.5  TESTKIT-000  fixtures/resource-000.tf:1  -
+  0dd973766999   13.5  iac         TESTKIT-000  fixtures/resource-000.tf:1  -
 
 2 finding(s)
+scanned at 2026-01-01T00:00:00Z · feed snapshot none
