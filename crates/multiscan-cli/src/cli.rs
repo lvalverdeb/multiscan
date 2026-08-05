@@ -168,11 +168,27 @@ pub enum ScanTarget {
 #[derive(Subcommand)]
 pub enum SuppressCmd {
     /// Add a suppression (requires justification, approver, expiry — CLI-006)
-    Add,
+    Add {
+        /// Finding id (or unique prefix) to suppress
+        finding_id: String,
+        /// Why it is suppressed (mandatory, CLI-006)
+        #[arg(long)]
+        justification: String,
+        /// Who approved it (mandatory, CLI-006)
+        #[arg(long)]
+        approver: String,
+        /// Expiry date, RFC 3339 (mandatory — permanent suppression does not
+        /// exist, CLI-006)
+        #[arg(long)]
+        expires: String,
+    },
     /// List active and expired suppressions
     List,
     /// Expire a suppression now
-    Expire,
+    Expire {
+        /// Finding id (or unique prefix) to expire
+        finding_id: String,
+    },
 }
 
 /// Database subcommands.

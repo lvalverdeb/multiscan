@@ -15,6 +15,7 @@ const SCORE_EPSILON: f64 = 0.001;
 struct Record {
     status: String,
     risk_score: f64,
+    finding: Finding,
 }
 
 /// In-memory store. `BTreeMap` keeps iteration deterministic (DET-001).
@@ -79,6 +80,7 @@ impl Store for MemoryStore {
                 Record {
                     status: status.clone(),
                     risk_score: score,
+                    finding: finding.clone(),
                 },
             );
             let log = self.events.entry(id.clone()).or_default();
@@ -106,6 +108,14 @@ impl Store for MemoryStore {
 
     fn history(&self, finding_id: &FindingId) -> Result<Vec<FindingEvent>, StoreError> {
         Ok(self.events.get(&finding_id.0).cloned().unwrap_or_default())
+    }
+
+    fn all_findings(&self) -> Result<Vec<Finding>, StoreError> {
+        Ok(self.findings.values().map(|r| r.finding.clone()).collect())
+    }
+
+    fn all_suppressions(&self) -> Result<Vec<Suppression>, StoreError> {
+        Ok(self.suppressions.values().cloned().collect())
     }
 
     fn active_suppressions(&self, now: DateTime<Utc>) -> Result<Vec<Suppression>, StoreError> {

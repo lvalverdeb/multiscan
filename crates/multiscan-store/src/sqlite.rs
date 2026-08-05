@@ -123,6 +123,53 @@ impl SqliteStore {
     }
 }
 
+impl SqliteStore {
+    /// Read suppressions; `filter` keeps only those active after the given
+    /// instant, `None` returns all (active and expired).
+    fn read_suppressions(
+        &self,
+        filter: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Suppression>, StoreError> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT finding_id, justification, approver, expires FROM suppressions
+                 ORDER BY finding_id",
+            )
+            .map_err(backend)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(backend)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (finding_id, justification, approver, expires) = row.map_err(backend)?;
+            let expires = DateTime::parse_from_rfc3339(&expires)
+                .map_err(serde)?
+                .with_timezone(&Utc);
+            let keep = match filter {
+                Some(now) => expires > now,
+                None => true,
+            };
+            if keep {
+                out.push(Suppression {
+                    finding_id,
+                    justification,
+                    approver,
+                    expires,
+                });
+            }
+        }
+        Ok(out)
+    }
+}
+
 fn kind_columns(kind: &FindingEventKind) -> (&'static str, Option<String>, Option<String>) {
     match kind {
         FindingEventKind::FirstSeen { status } => ("first_seen", None, Some(status.clone())),
@@ -309,40 +356,27 @@ impl Store for SqliteStore {
         Ok(events)
     }
 
-    fn active_suppressions(&self, now: DateTime<Utc>) -> Result<Vec<Suppression>, StoreError> {
+    fn all_findings(&self) -> Result<Vec<Finding>, StoreError> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT finding_id, justification, approver, expires FROM suppressions
-                 ORDER BY finding_id",
-            )
+            .prepare("SELECT finding_json FROM findings ORDER BY finding_id")
             .map_err(backend)?;
         let rows = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
+            .query_map([], |row| row.get::<_, String>(0))
             .map_err(backend)?;
-        let mut out = Vec::new();
+        let mut findings = Vec::new();
         for row in rows {
-            let (finding_id, justification, approver, expires) = row.map_err(backend)?;
-            let expires = DateTime::parse_from_rfc3339(&expires)
-                .map_err(serde)?
-                .with_timezone(&Utc);
-            if expires > now {
-                out.push(Suppression {
-                    finding_id,
-                    justification,
-                    approver,
-                    expires,
-                });
-            }
+            findings.push(serde_json::from_str(&row.map_err(backend)?).map_err(serde)?);
         }
-        Ok(out)
+        Ok(findings)
+    }
+
+    fn all_suppressions(&self) -> Result<Vec<Suppression>, StoreError> {
+        self.read_suppressions(None)
+    }
+
+    fn active_suppressions(&self, now: DateTime<Utc>) -> Result<Vec<Suppression>, StoreError> {
+        self.read_suppressions(Some(now))
     }
 
     fn put_suppression(&mut self, suppression: &Suppression) -> Result<(), StoreError> {

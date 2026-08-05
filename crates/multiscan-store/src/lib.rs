@@ -116,8 +116,16 @@ pub trait Store {
     /// Full append-only history for one Finding, oldest first.
     fn history(&self, finding_id: &FindingId) -> Result<Vec<FindingEvent>, StoreError>;
 
+    /// The current stored state of every Finding, ordered by `finding_id`.
+    /// Backs `multiscan diff` and `multiscan report`.
+    fn all_findings(&self) -> Result<Vec<Finding>, StoreError>;
+
     /// Suppressions still active at `now` (STO-004/FR-014).
     fn active_suppressions(&self, now: DateTime<Utc>) -> Result<Vec<Suppression>, StoreError>;
+
+    /// Every suppression, active or expired, ordered by `finding_id`. Backs
+    /// `multiscan suppress list`.
+    fn all_suppressions(&self) -> Result<Vec<Suppression>, StoreError>;
 
     /// Add or replace a suppression.
     fn put_suppression(&mut self, suppression: &Suppression) -> Result<(), StoreError>;

@@ -5,6 +5,7 @@ mod cli;
 mod configfile;
 mod db;
 mod exit;
+mod history;
 mod scan;
 
 use clap::{CommandFactory, Parser};
@@ -35,8 +36,8 @@ fn run(parsed: Cli) -> anyhow::Result<Exit> {
         Command::Import { .. } => not_yet("import", "T-305"),
         Command::Report => not_yet("report", "T-301"),
         Command::Explain { .. } => not_yet("explain", "T-603"),
-        Command::Diff { .. } => not_yet("diff", "T-302"),
-        Command::Suppress { .. } => not_yet("suppress", "T-302"),
+        Command::Diff { baseline } => history::diff(&baseline),
+        Command::Suppress { action } => history::suppress(&action),
         Command::Db { action } => db::run(&action),
         Command::Rules { .. } => not_yet("rules", "T-204"),
         Command::Authorize { .. } => not_yet("authorize", "T-501"),

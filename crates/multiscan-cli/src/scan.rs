@@ -29,6 +29,82 @@ fn usage(message: &str) -> Exit {
     Exit::Usage
 }
 
+/// Finding ids that are actively suppressed at `now` — the union of config
+/// `[[suppress]]` entries and store suppressions, each filtered by expiry
+/// (FR-014). Config entries work even with `--no-store` since they live in the
+/// committed config.
+fn active_suppression_ids(
+    config: &multiscan_core::Config,
+    root: &std::path::Path,
+    no_store: bool,
+    now: chrono::DateTime<chrono::Utc>,
+) -> std::collections::BTreeSet<String> {
+    let mut ids = std::collections::BTreeSet::new();
+
+    for entry in &config.suppress {
+        // `expires` is a date (or datetime); treat a bare date as end-of-day
+        // UTC so a suppression is active through its stated day.
+        if suppression_active(&entry.expires, now) {
+            ids.insert(entry.finding_id.0.clone());
+        }
+    }
+
+    if !no_store {
+        use multiscan_store::{SqliteStore, Store};
+        let db_path = root.join(".multiscan/multiscan.db");
+        if db_path.exists() {
+            if let Ok(store) = SqliteStore::open(&db_path) {
+                if let Ok(active) = store.active_suppressions(now) {
+                    for s in active {
+                        ids.insert(s.finding_id);
+                    }
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// Whether an `expires` string (RFC 3339 datetime or bare `YYYY-MM-DD`) is
+/// still in the future relative to `now`.
+fn suppression_active(expires: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(expires) {
+        return dt.with_timezone(&chrono::Utc) > now;
+    }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(expires, "%Y-%m-%d") {
+        // Active through the end of the stated day.
+        if let Some(end) = date.and_hms_opt(23, 59, 59) {
+            return end.and_utc() > now;
+        }
+    }
+    false
+}
+
+/// Baseline finding ids from `--baseline` or `[gate].baseline` (FR-010). The
+/// baseline is a JSON array of Findings (the `--format json` shape). Returns
+/// `Ok(None)` when no baseline is configured.
+fn load_baseline_ids(
+    args: &ScanArgs,
+    config: &multiscan_core::Config,
+) -> Result<Option<std::collections::BTreeSet<String>>, String> {
+    let path = match &args.baseline {
+        Some(p) => Some(p.clone()),
+        None => config
+            .gate
+            .as_ref()
+            .and_then(|g| g.baseline.as_ref())
+            .map(|rel| args.path.join(rel)),
+    };
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    let findings: Vec<Finding> =
+        serde_json::from_str(&text).map_err(|e| format!("parsing {}: {e}", path.display()))?;
+    Ok(Some(findings.into_iter().map(|f| f.finding_id.0).collect()))
+}
+
 /// Persist findings to `.multiscan/multiscan.db` under the scan root (STO-001).
 /// Best-effort: a store error never fails the scan (STO-003 keeps state
 /// optional), it degrades to a stderr warning.
@@ -379,7 +455,22 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
             )
         })
         .collect();
+    // Deterministic order before anything downstream reads the list (CLI-003).
     sort_findings(&mut findings);
+
+    // Apply active suppressions (config [[suppress]] + store), keyed by
+    // finding_id. An expired entry is simply not active, so its Finding
+    // reappears and gates normally (FR-014). Suppressed findings get status
+    // Suppressed and are excluded from the gate.
+    let now = chrono::DateTime::parse_from_rfc3339(&ctx.started_at)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let suppressed_ids = active_suppression_ids(&config, &args.path, args.no_store, now);
+    for finding in &mut findings {
+        if suppressed_ids.contains(&finding.finding_id.0) {
+            finding.status = FindingStatus::Suppressed;
+        }
+    }
 
     // Persist to the findings database unless stateless (STO-003). Store
     // failures degrade to a warning — a scan must still produce results.
@@ -387,10 +478,25 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         persist(&args.path, &findings, &ctx.started_at, args.quiet);
     }
 
+    // Baseline delta gating (FR-010): with a baseline, only Findings absent
+    // from it can block. The baseline is a Finding-set JSON file.
+    let baseline_ids = match load_baseline_ids(args, &config) {
+        Ok(ids) => ids,
+        Err(err) => return Ok(usage(&format!("--baseline: {err}"))),
+    };
+
     // Gate before display filtering: --min-severity is a display filter,
-    // never a gate (spec 4.2).
+    // never a gate (spec 4.2). Suppressed and baseline-known Findings never
+    // block.
     let blocking: Vec<&Finding> = findings
         .iter()
+        .filter(|f| f.status != FindingStatus::Suppressed)
+        .filter(|f| {
+            baseline_ids
+                .as_ref()
+                .map(|ids| !ids.contains(&f.finding_id.0))
+                .unwrap_or(true)
+        })
         .filter(|f| match &fail_on {
             None => false,
             Some(FailOn::Number(threshold)) => f.risk_score >= *threshold,
@@ -406,13 +512,17 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
     }
     let gate_failed = !blocking.is_empty();
 
-    let displayed: Vec<Finding> = match (format.is_machine(), min_severity) {
-        (false, Some(min)) => findings
-            .iter()
-            .filter(|f| f.severity >= min)
-            .cloned()
-            .collect(),
-        _ => findings,
+    // Human formats hide suppressed findings (a Suppression is time-bounded
+    // hiding, spec 2) and honour --min-severity; machine formats keep
+    // everything (suppressed findings carry status "suppressed" for audit).
+    let displayed: Vec<Finding> = if format.is_machine() {
+        findings
+    } else {
+        findings
+            .into_iter()
+            .filter(|f| f.status != FindingStatus::Suppressed)
+            .filter(|f| min_severity.map(|min| f.severity >= min).unwrap_or(true))
+            .collect()
     };
 
     // The single stdout write (CLI-001). The footer carries the scan
