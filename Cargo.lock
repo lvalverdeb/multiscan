@@ -1350,6 +1350,7 @@ dependencies = [
  "multiscan-feeds",
  "pep440_rs",
  "rpm",
+ "rusqlite",
  "semver",
  "serde",
  "serde_json",

@@ -28,7 +28,11 @@ pub enum Command {
         format: Option<String>,
     },
     /// Re-render stored Findings in another format
-    Report,
+    Report {
+        /// Output format: table | json | jsonl | sarif | sbom | markdown
+        #[arg(long)]
+        format: Option<String>,
+    },
     /// Full score breakdown, evidence, remediation for one Finding
     Explain {
         /// Finding id or unique prefix

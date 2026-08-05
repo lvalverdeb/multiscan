@@ -182,6 +182,24 @@ pub fn import(file: &Path, format: multiscan_report::Format) -> Result<Exit> {
     Ok(Exit::Clean)
 }
 
+/// `multiscan report [--format]` — re-render the stored Findings without
+/// re-scanning (spec 4.1). Reads the current state from the store, sorts
+/// deterministically (CLI-003), and renders.
+pub fn report(format: multiscan_report::Format) -> Result<Exit> {
+    let store = match open_store() {
+        Ok(s) => s,
+        Err(exit) => return Ok(exit),
+    };
+    let mut findings = store.all_findings().unwrap_or_default();
+    multiscan_report::sort_findings(&mut findings);
+    let footer = multiscan_report::Footer {
+        scanned_at: crate::scan::scan_timestamp(),
+        feed_snapshot_id: None,
+    };
+    print!("{}", multiscan_report::render(format, &findings, &footer));
+    Ok(Exit::Clean)
+}
+
 /// `multiscan explain <finding_id> [--history]` — full score breakdown,
 /// evidence, and remediation for one stored Finding (FR-016, RSK-005).
 pub fn explain(finding_id: &str, history: bool) -> Result<Exit> {

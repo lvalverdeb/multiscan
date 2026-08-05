@@ -44,6 +44,12 @@ impl OsRelease {
                 let series: Vec<&str> = v.split('.').take(2).collect();
                 format!("Alpine:v{}", series.join("."))
             }),
+            // rpm distros. OSV names: "Red Hat" (unqualified), "Rocky Linux:9",
+            // "AlmaLinux:9", "Fedora:39".
+            "rhel" | "centos" => Some("Red Hat".to_string()),
+            "rocky" => v.map(|v| format!("Rocky Linux:{}", v.split('.').next().unwrap_or(v))),
+            "almalinux" => v.map(|v| format!("AlmaLinux:{}", v.split('.').next().unwrap_or(v))),
+            "fedora" => v.map(|v| format!("Fedora:{v}")),
             _ => None,
         }
     }
@@ -82,7 +88,8 @@ pub fn detect_os(root: &Dir) -> Option<OsRelease> {
 
 /// Read all installed OS packages from whichever database is present.
 /// Returns `(packages, unsupported_db)` — the flag is set when an rpm database
-/// is detected but not parseable, so the caller can degrade to `Partial`.
+/// is present in a format we do not parse (Berkeley DB / ndb), so the caller
+/// can degrade to `Partial`.
 pub fn read_packages(root: &Dir) -> (Vec<OsPackage>, bool) {
     if let Some(text) = read_confined(root, "var/lib/dpkg/status") {
         return (parse_dpkg_status(&text), false);
@@ -90,13 +97,20 @@ pub fn read_packages(root: &Dir) -> (Vec<OsPackage>, bool) {
     if let Some(text) = read_confined(root, "lib/apk/db/installed") {
         return (parse_apk_installed(&text), false);
     }
-    // rpm: any of these paths indicates an rpm database we cannot yet parse.
-    for rpmdb in [
+    // Modern rpm (RHEL 9+/Fedora): the sqlite rpmdb, whose Packages blobs are
+    // raw rpm headers.
+    for sqlite_db in [
         "var/lib/rpm/rpmdb.sqlite",
-        "var/lib/rpm/Packages",
-        "var/lib/rpm/Packages.db",
         "usr/lib/sysimage/rpm/rpmdb.sqlite",
     ] {
+        if let Some(bytes) = read_confined_bytes(root, sqlite_db) {
+            if let Some(packages) = crate::image::rpmdb::read_sqlite_rpmdb(&bytes) {
+                return (packages, false);
+            }
+        }
+    }
+    // Older rpm (RHEL 7/8): Berkeley DB / ndb — detected but not parsed.
+    for rpmdb in ["var/lib/rpm/Packages", "var/lib/rpm/Packages.db"] {
         if dir_has(root, rpmdb) {
             return (Vec::new(), true);
         }
@@ -180,6 +194,20 @@ fn read_confined(root: &Dir, path: &str) -> Option<String> {
         .read_to_end(&mut buf)
         .ok()?;
     String::from_utf8(buf).ok()
+}
+
+/// Read a (possibly large, binary) file confined beneath `root`; `None` if
+/// absent/unreadable. Capped at 512 MiB (an rpmdb can be large but not
+/// unbounded — untrusted input).
+fn read_confined_bytes(root: &Dir, path: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut file = root.open(path).ok()?;
+    let mut buf = Vec::new();
+    file.by_ref()
+        .take(512 * 1024 * 1024)
+        .read_to_end(&mut buf)
+        .ok()?;
+    Some(buf)
 }
 
 fn dir_has(root: &Dir, path: &str) -> bool {

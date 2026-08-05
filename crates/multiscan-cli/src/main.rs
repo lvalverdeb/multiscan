@@ -52,7 +52,19 @@ fn run(parsed: Cli) -> anyhow::Result<Exit> {
             };
             history::import(&file, fmt)
         }
-        Command::Report => not_yet("report", "T-301"),
+        Command::Report { format } => {
+            let fmt = match format.as_deref() {
+                None => multiscan_report::Format::Table,
+                Some(name) => match multiscan_report::Format::parse(name) {
+                    Some(f) => f,
+                    None => {
+                        eprintln!("multiscan: error: unknown format `{name}`");
+                        return Ok(Exit::Usage);
+                    }
+                },
+            };
+            history::report(fmt)
+        }
         Command::Explain {
             finding_id,
             history,

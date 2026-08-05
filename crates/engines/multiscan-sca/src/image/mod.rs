@@ -5,6 +5,7 @@
 mod extract;
 mod oci;
 mod ospkg;
+mod rpmdb;
 
 pub use extract::{extract_layer, ExtractError, Limits, Stats};
 pub use oci::{OciClient, OciError, PulledImage, Reference};
