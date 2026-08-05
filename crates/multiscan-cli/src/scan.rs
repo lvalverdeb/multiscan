@@ -226,7 +226,9 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
                 );
                 return Ok(Exit::FeedsStale);
             }
-            if !args.quiet {
+            // Only relevant when dependency scanning is actually running; the
+            // secrets/iac layers need no feeds (FD-007).
+            if !args.quiet && layers.contains(&Layer::Sca) {
                 eprintln!(
                     "multiscan: warning: no feed snapshot; dependency enrichment \
                      unavailable (run `multiscan db update`)"
