@@ -57,5 +57,9 @@ handled defensively:
 - New/updated detectors ship as a signed feed bundle — no binary release.
 - Live `db update` fetches advisory feeds only for now; a dedicated rules-feed
   URL can populate `rule_packs` later without changing the consumer contract.
-- The mechanism generalizes: IaC and probe packs can be distributed the same
-  way when needed.
+- The mechanism is generalized across engines: `rules/secrets.json` (secrets
+  rule pack), `rules/iac.json` (IaC/CIS policy pack), and `rules/probe.json`
+  (probe template pack) are each resolved from the pinned snapshot in
+  preference to the embedded default, honoring the matching `[rules] *_pack`
+  pin and falling back safely. All three share the digest-verified,
+  signed-bundle-carried, ReDoS-safe contract above.

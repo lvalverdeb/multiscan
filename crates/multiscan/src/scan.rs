@@ -126,6 +126,109 @@ fn resolve_secrets_pack(
     chosen
 }
 
+/// Resolve the IaC engine for this scan (ADR 0010): prefer a policy pack
+/// distributed in the pinned snapshot (`rules/iac.json`, digest-verified),
+/// falling back to the embedded CIS pack. A `[rules] iac_pack = "id@version"`
+/// pin selects the matching pack; a snapshot pack that fails to parse or does
+/// not satisfy the pin yields the embedded baseline. Provenance is logged
+/// under `--verbose`.
+fn resolve_iac_engine(
+    ctx: &ScanContext,
+    config: &multiscan_core::Config,
+    quiet: bool,
+    verbose: bool,
+) -> multiscan_iac::IacEngine {
+    let pin = config.rules.as_ref().and_then(|r| r.iac_pack.clone());
+
+    let from_snapshot = ctx
+        .feed_cache_dir
+        .as_ref()
+        .and_then(|cache| multiscan_feeds::current_snapshot(cache).ok().flatten())
+        .and_then(|snapshot| match snapshot.rule_pack("iac") {
+            Some(Ok(bytes)) => match multiscan_iac::IacEngine::from_pack_bytes(&bytes) {
+                Ok(engine) => Some(engine),
+                Err(err) => {
+                    if !quiet {
+                        eprintln!("multiscan: warning: feed iac pack invalid, using embedded: {err}");
+                    }
+                    None
+                }
+            },
+            Some(Err(err)) => {
+                if !quiet {
+                    eprintln!("multiscan: warning: feed iac pack unreadable, using embedded: {err}");
+                }
+                None
+            }
+            None => None,
+        });
+
+    let satisfies = |engine: &multiscan_iac::IacEngine| match &pin {
+        Some(p) => engine.pack_ref() == *p,
+        None => true,
+    };
+
+    let embedded = multiscan_iac::IacEngine::new();
+    let (engine, from_feed) = match from_snapshot {
+        Some(engine) if satisfies(&engine) => (engine, true),
+        _ if satisfies(&embedded) => (embedded, false),
+        _ => {
+            if !quiet {
+                eprintln!(
+                    "multiscan: warning: no iac pack matches pin `{}`; using embedded builtin",
+                    pin.as_deref().unwrap_or("")
+                );
+            }
+            (multiscan_iac::IacEngine::new(), false)
+        }
+    };
+
+    if verbose && !quiet {
+        let source = if from_feed { "feed snapshot" } else { "embedded" };
+        eprintln!("multiscan: iac policy pack {} ({source})", engine.pack_ref());
+    }
+    engine
+}
+
+/// Resolve probe templates (ADR 0010): prefer a `rules/probe.json` template
+/// pack distributed in the pinned snapshot (digest-verified), falling back to
+/// the embedded templates. The pack is a JSON array of templates — parsed by
+/// the same (YAML-superset) reader — so it rides the `.json` snapshot
+/// convention. Every template is validated (idempotent method, PRB-004) by
+/// `parse_pack` before use.
+fn resolve_probe_templates(
+    quiet: bool,
+    verbose: bool,
+) -> Result<Vec<multiscan_probe::Template>, multiscan_probe::TemplateError> {
+    let from_snapshot = multiscan_feeds::current_snapshot(&multiscan_feeds::cache_dir())
+        .ok()
+        .flatten()
+        .and_then(|snapshot| snapshot.rule_pack("probe").and_then(|r| r.ok()))
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+        .and_then(|text| match multiscan_probe::Template::parse_pack(&text) {
+            Ok(templates) => Some(templates),
+            Err(e) => {
+                if !quiet {
+                    eprintln!("multiscan: warning: feed probe pack invalid, using embedded: {e}");
+                }
+                None
+            }
+        });
+
+    match from_snapshot {
+        Some(templates) => {
+            if verbose && !quiet {
+                eprintln!(
+                    "multiscan: probe templates: {} from feed snapshot",
+                    templates.len()
+                );
+            }
+            Ok(templates)
+        }
+        None => multiscan_probe::builtin_templates(),
+    }
+}
+
 /// Finding ids suppressed by the store at `now` (`multiscan suppress add`),
 /// filtered by expiry (FR-014). Config `[[suppress]]` entries are handled
 /// separately by [`crate::suppress`] since they carry scoped selectors and
@@ -346,7 +449,7 @@ fn scan_web(url: &str, args: &crate::cli::ScanArgs) -> Result<Exit> {
     // Execute the bundled declarative templates over the scoped transport.
     let (scheme, port) = scheme_and_port(url);
     let origin = format!("{scheme}://{host}:{port}");
-    let templates = match multiscan_probe::builtin_templates() {
+    let templates = match resolve_probe_templates(args.quiet, args.verbose) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("multiscan: error: probe templates: {e}");
@@ -860,7 +963,7 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         registry.register(Box::new(multiscan_secrets::SecretsEngine::with_pack(pack)));
     }
     if ctx.layers.contains(&Layer::Iac) {
-        registry.register(Box::new(multiscan_iac::IacEngine::new()));
+        registry.register(Box::new(resolve_iac_engine(&ctx, &config, args.quiet, args.verbose)));
     }
     if ctx.layers.contains(&Layer::Sast) {
         // v1 scaffold: registered but always NotApplicable (NG-2).

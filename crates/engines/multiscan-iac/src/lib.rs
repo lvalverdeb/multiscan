@@ -48,14 +48,41 @@ pub struct IacEngine {
 }
 
 impl IacEngine {
-    /// Construct the engine, loading the embedded policy pack.
+    /// Construct the engine with the embedded CIS policy pack.
     pub fn new() -> Self {
-        let pack: Pack = serde_json::from_str(CIS_PACK).unwrap_or(Pack {
-            pack_id: "cis-core".to_string(),
-            version: "0".to_string(),
-            policies: Vec::new(),
-        });
-        let pack_digest = format!("blake3:{}", blake3::hash(CIS_PACK.as_bytes()).to_hex());
+        // The embedded pack is validated in tests, so parse failure is a bug;
+        // fall back to an empty pack rather than panic in library code.
+        Self::from_pack_bytes(CIS_PACK.as_bytes()).unwrap_or_else(|_| {
+            Self::build(
+                Pack {
+                    pack_id: "cis-core".to_string(),
+                    version: "0".to_string(),
+                    policies: Vec::new(),
+                },
+                String::new(),
+            )
+        })
+    }
+
+    /// Construct from a policy pack distributed through the feed channel
+    /// (ADR 0010): `rules/iac.json` bytes, digest-verified upstream. Returns
+    /// an error if the JSON does not parse; the caller falls back to the
+    /// embedded pack.
+    pub fn from_pack_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let pack: Pack = serde_json::from_slice(bytes).map_err(|e| format!("iac pack: {e}"))?;
+        let digest = format!("blake3:{}", blake3::hash(bytes).to_hex());
+        Ok(Self::build(pack, digest))
+    }
+
+    /// The pack this engine loaded, as `id@version` — for pin checks.
+    pub fn pack_ref(&self) -> String {
+        match &self.manifest.rule_set {
+            Some(rs) => format!("{}@{}", rs.id, rs.version),
+            None => String::new(),
+        }
+    }
+
+    fn build(pack: Pack, pack_digest: String) -> Self {
         let mapping_gaps = pack
             .policies
             .iter()
@@ -67,8 +94,6 @@ impl IacEngine {
         for p in &pack.policies {
             severity_map.insert(p.id.clone(), parse_severity(&p.severity));
         }
-
-        let _ = (&pack.pack_id, &pack.version); // recorded in provenance below
 
         Self {
             manifest: EngineManifest {
