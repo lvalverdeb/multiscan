@@ -48,6 +48,84 @@ fn load_ignore_files(root: &std::path::Path, respect_gitignore: bool) -> multisc
     multiscan_engine::IgnoreSet::parse(&text)
 }
 
+/// Resolve the secrets rule pack for this scan (ADR 0010): prefer a pack
+/// distributed in the pinned feed snapshot (`rules/secrets.json`,
+/// digest-verified), falling back to the embedded builtin. A `[rules]
+/// secrets_pack = "id@version"` pin selects the matching pack; if the snapshot
+/// pack fails to parse or does not satisfy the pin, the embedded baseline is
+/// used. The chosen pack's provenance is logged on stderr under `--verbose`.
+fn resolve_secrets_pack(
+    ctx: &ScanContext,
+    config: &multiscan_core::Config,
+    quiet: bool,
+    verbose: bool,
+) -> multiscan_secrets::RulePack {
+    let builtin = multiscan_secrets::builtin_pack();
+    let pin = config.rules.as_ref().and_then(|r| r.secrets_pack.clone());
+
+    // A pack from the pinned snapshot, if one is present and valid.
+    let snapshot_pack = ctx
+        .feed_cache_dir
+        .as_ref()
+        .and_then(|cache| multiscan_feeds::current_snapshot(cache).ok().flatten())
+        .and_then(|snapshot| match snapshot.rule_pack("secrets") {
+            Some(Ok(bytes)) => {
+                match multiscan_secrets::parse_pack(&bytes) {
+                    Ok(pack) => Some(pack),
+                    Err(err) => {
+                        if !quiet {
+                            eprintln!(
+                                "multiscan: warning: feed secrets pack invalid, using embedded: {err}"
+                            );
+                        }
+                        None
+                    }
+                }
+            }
+            Some(Err(err)) => {
+                if !quiet {
+                    eprintln!("multiscan: warning: feed secrets pack unreadable, using embedded: {err}");
+                }
+                None
+            }
+            None => None,
+        });
+
+    let satisfies = |pack: &multiscan_secrets::RulePack| match &pin {
+        Some(p) => format!("{}@{}", pack.id, pack.version) == *p,
+        None => true,
+    };
+
+    // Preference: snapshot pack, then embedded — first that satisfies the pin.
+    let chosen = match &snapshot_pack {
+        Some(pack) if satisfies(pack) => pack.clone(),
+        _ if satisfies(&builtin) => builtin.clone(),
+        // Pin matches neither: fall back to the snapshot pack if any, else
+        // the baseline, and warn that the pin was not honored.
+        _ => {
+            if !quiet {
+                eprintln!(
+                    "multiscan: warning: no secrets pack matches pin `{}`; using embedded builtin",
+                    pin.as_deref().unwrap_or("")
+                );
+            }
+            builtin.clone()
+        }
+    };
+
+    if verbose && !quiet {
+        let source = match &snapshot_pack {
+            Some(p) if p.digest == chosen.digest => "feed snapshot",
+            _ => "embedded",
+        };
+        eprintln!(
+            "multiscan: secrets rule pack {}@{} ({source}, {})",
+            chosen.id, chosen.version, chosen.digest
+        );
+    }
+    chosen
+}
+
 /// Finding ids suppressed by the store at `now` (`multiscan suppress add`),
 /// filtered by expiry (FR-014). Config `[[suppress]]` entries are handled
 /// separately by [`crate::suppress`] since they carry scoped selectors and
@@ -778,7 +856,8 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         registry.register(Box::new(multiscan_sca::ScaEngine::new()));
     }
     if ctx.layers.contains(&Layer::Secrets) {
-        registry.register(Box::new(multiscan_secrets::SecretsEngine::new()));
+        let pack = resolve_secrets_pack(&ctx, &config, args.quiet, args.verbose);
+        registry.register(Box::new(multiscan_secrets::SecretsEngine::with_pack(pack)));
     }
     if ctx.layers.contains(&Layer::Iac) {
         registry.register(Box::new(multiscan_iac::IacEngine::new()));

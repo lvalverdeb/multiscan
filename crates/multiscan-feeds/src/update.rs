@@ -104,6 +104,10 @@ pub fn update(
             kev_json,
             epss_csv,
             osv_jsonl,
+            // Live update fetches advisory feeds only; rule packs are
+            // distributed via signed air-gap bundles (ADR 0010), not the
+            // network fetch, until a dedicated rules-feed URL exists.
+            rule_packs: BTreeMap::new(),
             counts: SnapshotCounts {
                 kev: kev_count,
                 epss: epss_count,

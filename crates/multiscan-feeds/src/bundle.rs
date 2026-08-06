@@ -167,18 +167,27 @@ pub fn import(
             .ok_or_else(|| FeedError::Corrupt(format!("bundle missing file {name}")))
     };
     let mut osv_jsonl = BTreeMap::new();
+    let mut rule_packs = BTreeMap::new();
     for name in manifest.files.keys() {
         if let Some(eco) = name
             .strip_prefix("osv/")
             .and_then(|n| n.strip_suffix(".jsonl"))
         {
             osv_jsonl.insert(eco.to_string(), take(name)?);
+        } else if let Some(pack) = name
+            .strip_prefix("rules/")
+            .and_then(|n| n.strip_suffix(".json"))
+        {
+            // Rule packs ride the signed bundle like any other feed file
+            // (ADR 0010); they are digest-verified on install.
+            rule_packs.insert(pack.to_string(), take(name)?);
         }
     }
     let data = SnapshotData {
         kev_json: take("kev.json")?,
         epss_csv: take("epss.csv")?,
         osv_jsonl,
+        rule_packs,
         counts: manifest.counts.clone(),
         sources: manifest.sources.clone(),
     };

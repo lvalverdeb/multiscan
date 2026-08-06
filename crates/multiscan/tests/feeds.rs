@@ -16,6 +16,7 @@ fn seed_snapshot(cache: &Path, age: Duration) -> String {
         kev_json: br#"{"vulnerabilities":[{"cveID":"CVE-2021-44228"}]}"#.to_vec(),
         epss_csv: b"cve,epss,percentile\nCVE-2021-44228,0.9,0.99\n".to_vec(),
         osv_jsonl: BTreeMap::new(),
+        rule_packs: std::collections::BTreeMap::new(),
         counts: SnapshotCounts {
             kev: 1,
             epss: 1,

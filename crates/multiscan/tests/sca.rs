@@ -28,6 +28,7 @@ fn seed_snapshot(cache: &Path) -> String {
         kev_json: br#"{"vulnerabilities":[{"cveID":"CVE-2021-23337"}]}"#.to_vec(),
         epss_csv: b"cve,epss,percentile\nCVE-2021-23337,0.6,0.97\n".to_vec(),
         osv_jsonl: osv,
+        rule_packs: std::collections::BTreeMap::new(),
         counts: SnapshotCounts {
             kev: 1,
             epss: 1,
@@ -173,6 +174,7 @@ fn uv_lock_resolves_pypi_advisory_offline() {
         kev_json: br#"{"vulnerabilities":[]}"#.to_vec(),
         epss_csv: b"cve,epss,percentile\n".to_vec(),
         osv_jsonl: osv,
+        rule_packs: std::collections::BTreeMap::new(),
         counts: SnapshotCounts {
             kev: 0,
             epss: 0,
@@ -227,6 +229,7 @@ fn seed_ecosystems(cache: &Path, advisories: &[(&str, &str)]) {
         kev_json: br#"{"vulnerabilities":[]}"#.to_vec(),
         epss_csv: b"cve,epss,percentile\n".to_vec(),
         osv_jsonl: osv,
+        rule_packs: std::collections::BTreeMap::new(),
         counts: SnapshotCounts {
             kev: 0,
             epss: 0,

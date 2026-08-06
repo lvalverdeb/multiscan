@@ -23,6 +23,7 @@ use multiscan_engine::{
 
 pub use entropy::shannon_bits;
 pub use fingerprint::{fingerprint, mask};
+pub use rules::{builtin_pack, parse_pack, RulePack};
 
 /// Files larger than this are skipped (untrusted input; secrets live in source
 /// and config, not multi-GB blobs).
@@ -42,11 +43,17 @@ pub struct SecretsEngine {
 }
 
 impl SecretsEngine {
-    /// Construct the engine with the bundled rule pack. The severity map is
-    /// derived from the pack (ENG-004: explicit, never inferred at match
-    /// time) plus the engine-owned entropy fallback entry.
+    /// Construct the engine with the embedded rule pack.
     pub fn new() -> Self {
-        let pack = rules::builtin_pack();
+        Self::with_pack(rules::builtin_pack())
+    }
+
+    /// Construct the engine with a specific rule pack — the embedded builtin,
+    /// or one distributed through the feed channel (ADR 0010). The severity
+    /// map and manifest `rule_set` provenance are derived from the pack
+    /// (ENG-004: explicit, never inferred at match time), plus the
+    /// engine-owned entropy fallback entry.
+    pub fn with_pack(pack: rules::RulePack) -> Self {
         let mut severity_map: std::collections::BTreeMap<String, Severity> = pack
             .rules
             .iter()

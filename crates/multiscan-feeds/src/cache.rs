@@ -82,6 +82,7 @@ pub struct Snapshot {
 }
 
 /// Payload for writing a new snapshot.
+#[derive(Default)]
 pub struct SnapshotData {
     /// Raw KEV catalog JSON.
     pub kev_json: Vec<u8>,
@@ -89,6 +90,11 @@ pub struct SnapshotData {
     pub epss_csv: Vec<u8>,
     /// Ecosystem → JSONL advisory content.
     pub osv_jsonl: BTreeMap<String, Vec<u8>>,
+    /// Engine rule packs distributed with the feed (ADR 0010): pack name
+    /// (e.g. `secrets`) → pack JSON bytes, written as `rules/<name>.json` and
+    /// digest-verified like every other snapshot file. Lets new detectors ship
+    /// as a data refresh, not a binary release.
+    pub rule_packs: BTreeMap<String, Vec<u8>>,
     /// Entry counts.
     pub counts: SnapshotCounts,
     /// Feed name → source URL.
@@ -151,6 +157,17 @@ impl Snapshot {
         Ok(bytes)
     }
 
+    /// Read a distributed engine rule pack (`rules/<name>.json`) if this
+    /// snapshot carries one, digest-verified (ADR 0010). `None` when the
+    /// snapshot has no such pack; `Some(Err(..))` if it is present but corrupt.
+    pub fn rule_pack(&self, name: &str) -> Option<Result<Vec<u8>, FeedError>> {
+        let file = format!("rules/{name}.json");
+        if !self.manifest.files.contains_key(&file) {
+            return None;
+        }
+        Some(self.read_file(&file))
+    }
+
     /// Load the KEV/EPSS enrichment maps for scoring.
     pub fn enrichment(&self) -> Result<crate::Enrichment, FeedError> {
         let kev = self.read_file("kev.json")?;
@@ -178,6 +195,12 @@ pub fn write_snapshot(
             )));
         }
         files.insert(format!("osv/{ecosystem}.jsonl"), jsonl);
+    }
+    for (name, pack) in &data.rule_packs {
+        if name.contains(['/', '\\']) || name.contains("..") {
+            return Err(FeedError::Corrupt(format!("invalid rule pack name `{name}`")));
+        }
+        files.insert(format!("rules/{name}.json"), pack);
     }
 
     let mut metas: BTreeMap<String, FileMeta> = BTreeMap::new();
@@ -215,6 +238,9 @@ pub fn write_snapshot(
         std::fs::remove_dir_all(&staging)?;
     }
     std::fs::create_dir_all(staging.join("osv"))?;
+    if !data.rule_packs.is_empty() {
+        std::fs::create_dir_all(staging.join("rules"))?;
+    }
     for (name, bytes) in &files {
         std::fs::write(staging.join(name), bytes)?;
     }

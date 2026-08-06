@@ -23,6 +23,7 @@ fn seed(cache: &Path) -> String {
             kev_json: b"{\"vulnerabilities\":[{\"cveID\":\"CVE-1\"}]}".to_vec(),
             epss_csv: b"cve,epss,percentile\nCVE-1,0.5,0.9\n".to_vec(),
             osv_jsonl: osv,
+            rule_packs: std::collections::BTreeMap::new(),
             counts: SnapshotCounts {
                 kev: 1,
                 epss: 1,

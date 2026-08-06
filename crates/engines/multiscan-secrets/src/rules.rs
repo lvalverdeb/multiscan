@@ -17,6 +17,7 @@ use serde::Deserialize;
 const BUILTIN_PACK: &str = include_str!("../rules/builtin.json");
 
 /// One pattern-based secret rule.
+#[derive(Clone)]
 pub struct Rule {
     /// Stable rule id (identity input, spec 7.7.2).
     pub id: String,
@@ -43,6 +44,7 @@ impl Rule {
 
 /// A loaded rule pack: identity for the manifest's `rule_set` plus the
 /// compiled rules.
+#[derive(Clone)]
 pub struct RulePack {
     /// Pack id (`builtin` for the embedded pack; `[rules] secrets_pack` pins
     /// against this).
@@ -72,19 +74,25 @@ struct RuleSpec {
     confidence: Confidence,
 }
 
-/// Load the embedded pack. A malformed built-in pattern is a bug, not user
-/// input; the rule is skipped rather than panicking so one bad rule never
-/// aborts a scan (the pack-integrity test fails the build instead).
-pub fn builtin_pack() -> RulePack {
-    let digest = format!("blake3:{}", blake3::hash(BUILTIN_PACK.as_bytes()).to_hex());
-    let parsed: PackFile = serde_json::from_str(BUILTIN_PACK).unwrap_or(PackFile {
-        pack_id: "builtin".to_string(),
-        version: "0".to_string(),
-        rules: Vec::new(),
-    });
+/// Defensive caps for a distributed (feed-delivered) pack: it is signed and
+/// digest-verified upstream, but still external data. The `regex` crate is
+/// linear-time (no catastrophic backtracking), so ReDoS is not a concern; we
+/// cap count and pattern length to bound compile time and memory (ADR 0010).
+const MAX_PACK_RULES: usize = 10_000;
+const MAX_PATTERN_BYTES: usize = 4_096;
+
+/// Compile a pack from its JSON bytes; the blake3 digest is computed for
+/// provenance. A rule whose pattern fails to compile or exceeds the pattern
+/// cap is skipped (one bad rule never aborts a scan); the rest still apply.
+pub fn parse_pack(bytes: &[u8]) -> Result<RulePack, String> {
+    let digest = format!("blake3:{}", blake3::hash(bytes).to_hex());
+    let parsed: PackFile =
+        serde_json::from_slice(bytes).map_err(|e| format!("rule pack: {e}"))?;
     let rules = parsed
         .rules
         .into_iter()
+        .take(MAX_PACK_RULES)
+        .filter(|spec| spec.pattern.len() <= MAX_PATTERN_BYTES)
         .filter_map(|spec| {
             Regex::new(&spec.pattern).ok().map(|pattern| Rule {
                 id: spec.id,
@@ -95,12 +103,24 @@ pub fn builtin_pack() -> RulePack {
             })
         })
         .collect();
-    RulePack {
+    Ok(RulePack {
         id: parsed.pack_id,
         version: parsed.version,
         digest,
         rules,
-    }
+    })
+}
+
+/// Load the embedded pack. A malformed built-in pattern is a bug, not user
+/// input; the rule is skipped rather than panicking so one bad rule never
+/// aborts a scan (the pack-integrity test fails the build instead).
+pub fn builtin_pack() -> RulePack {
+    parse_pack(BUILTIN_PACK.as_bytes()).unwrap_or_else(|_| RulePack {
+        id: "builtin".to_string(),
+        version: "0".to_string(),
+        digest: String::new(),
+        rules: Vec::new(),
+    })
 }
 
 #[cfg(test)]

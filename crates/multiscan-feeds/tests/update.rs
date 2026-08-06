@@ -147,6 +147,7 @@ fn tampered_snapshot_file_is_detected() {
             kev_json: KEV_FIXTURE.as_bytes().to_vec(),
             epss_csv: EPSS_FIXTURE.as_bytes().to_vec(),
             osv_jsonl: BTreeMap::new(),
+            rule_packs: std::collections::BTreeMap::new(),
             counts: SnapshotCounts::default(),
             sources: BTreeMap::new(),
         },
@@ -180,6 +181,7 @@ fn identical_content_same_day_converges_on_one_snapshot_id() {
         kev_json: KEV_FIXTURE.as_bytes().to_vec(),
         epss_csv: EPSS_FIXTURE.as_bytes().to_vec(),
         osv_jsonl: BTreeMap::new(),
+        rule_packs: std::collections::BTreeMap::new(),
         counts: SnapshotCounts::default(),
         sources: BTreeMap::new(),
     };
