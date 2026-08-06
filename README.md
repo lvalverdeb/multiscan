@@ -145,7 +145,7 @@ fuzz/                  cargo-fuzz targets for untrusted-input parsers
 
 ## Development
 
-The normative spec is [`MULTISCAN-SDD-v1.0.md`](MULTISCAN-SDD-v1.0.md); contributor conventions are in [`CLAUDE.md`](CLAUDE.md). Read the spec's §0.1 before your first change — when spec and code disagree, the code is wrong.
+The normative spec is [`MULTISCAN-SDD-v1.0.md`](MULTISCAN-SDD-v1.0.md); contributor conventions are in [`CLAUDE.md`](CLAUDE.md). Read the spec's §0.1 before your first change — when spec and code disagree, the code is wrong, **unless an [Architecture Decision Record](docs/adr/) says otherwise**. Deliberate deviations, extensions, and amendments to the spec are recorded in [`docs/adr/`](docs/adr/).
 
 ```sh
 cargo xtask gen          # regenerate types from schemas/ (after any schema edit)
