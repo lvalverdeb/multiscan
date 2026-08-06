@@ -558,12 +558,23 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         )));
     }
 
-    let (config, config_path) = match configfile::load(args.config.as_deref(), &args.path) {
+    let (mut config, config_path) = match configfile::load(args.config.as_deref(), &args.path) {
         Ok(loaded) => loaded,
         Err(err) => {
             eprintln!("multiscan: error: {err:#}");
             return Ok(Exit::Usage);
         }
+    };
+    // Precedence (spec 4.5): --exclude replaces the file's global [scan]
+    // exclude list. Per-layer lists have no flag and always apply.
+    if !args.exclude.is_empty() {
+        config.scan.get_or_insert_with(Default::default).exclude = args.exclude.clone();
+    }
+    // Compile exclude globs now so a bad pattern is a config error (exit 2),
+    // whether it came from the file or the flag — never an engine failure.
+    let excludes = match multiscan_engine::PathFilter::from_config(&config) {
+        Ok(filter) => filter,
+        Err(err) => return Ok(usage(&err.to_string())),
     };
     if args.verbose && !args.quiet {
         match &config_path {
@@ -728,6 +739,7 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
     let ctx = ScanContext {
         root: args.path.clone(),
         config: config.clone(),
+        excludes,
         profile,
         layers,
         feed_snapshot_id: feed_snapshot_id.clone(),
@@ -929,7 +941,7 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         // SBOM is a component inventory from the SCA resolved graph (spec 12),
         // independent of which findings surfaced.
         let components: Vec<multiscan_report::SbomComponent> =
-            multiscan_sca::resolve_inventory(&args.path)
+            multiscan_sca::resolve_inventory(&args.path, &ctx.excludes)
                 .into_iter()
                 .map(|p| multiscan_report::SbomComponent {
                     purl: p.purl(),

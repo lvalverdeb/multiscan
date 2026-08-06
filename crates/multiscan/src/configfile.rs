@@ -117,4 +117,32 @@ expires = "2026-11-01"
     fn unknown_keys_rejected() {
         assert!(toml::from_str::<Config>("[scan]\nbogus = 1\n").is_err());
     }
+
+    /// ADR 0004: per-layer [scan.<layer>] sections parse, and only the three
+    /// file-based layers exist — anything else is a config error.
+    #[test]
+    fn per_layer_exclude_sections_parse() {
+        let good = r#"
+[scan]
+exclude = [".idea/**"]
+
+[scan.secrets]
+exclude = ["**/*.lock"]
+
+[scan.sca]
+exclude = ["fixtures/**"]
+
+[scan.iac]
+exclude = ["examples/**"]
+"#;
+        let config: Config = toml::from_str(good).expect("per-layer sections must parse");
+        let scan = config.scan.unwrap();
+        assert_eq!(scan.secrets.unwrap().exclude, vec!["**/*.lock"]);
+        assert_eq!(scan.sca.unwrap().exclude, vec!["fixtures/**"]);
+        assert_eq!(scan.iac.unwrap().exclude, vec!["examples/**"]);
+
+        // No [scan.probe] (no local files) and no [scan.sast] (v1 scaffold).
+        assert!(toml::from_str::<Config>("[scan.probe]\nexclude = [\"x\"]\n").is_err());
+        assert!(toml::from_str::<Config>("[scan.sast]\nexclude = [\"x\"]\n").is_err());
+    }
 }

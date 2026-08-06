@@ -16,7 +16,7 @@ use multiscan_core::{
     Location, NetworkImpact, RawFinding, Severity,
 };
 use multiscan_engine::{
-    Applicability, Engine, EngineError, EngineOutcome, FindingSink, ScanContext,
+    Applicability, Engine, EngineError, EngineOutcome, FindingSink, PathFilter, ScanContext,
 };
 
 pub use entropy::shannon_bits;
@@ -82,8 +82,9 @@ impl Default for SecretsEngine {
     }
 }
 
-/// Files under `root` (bounded; skips VCS/vendor dirs).
-fn find_files(root: &Path) -> Vec<(PathBuf, String)> {
+/// Files under `root` (bounded; skips VCS/vendor dirs and configured
+/// excludes — `[scan] exclude` plus `[scan.secrets] exclude`, ADR 0004).
+fn find_files(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String)> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     let mut visited = 0usize;
@@ -99,17 +100,20 @@ fn find_files(root: &Path) -> Vec<(PathBuf, String)> {
             }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if excludes.is_excluded(Layer::Secrets, &rel) {
+                continue; // matched dirs prune the walk, matched files skip
+            }
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 if matches!(name.as_str(), ".git" | "node_modules" | "target" | ".venv") {
                     continue;
                 }
                 stack.push(path);
             } else {
-                let rel = path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
                 found.push((path, rel));
             }
         }
@@ -133,7 +137,7 @@ impl Engine for SecretsEngine {
         ctx: &ScanContext,
         sink: &mut dyn FindingSink,
     ) -> Result<EngineOutcome, EngineError> {
-        let files = find_files(&ctx.root);
+        let files = find_files(&ctx.root, &ctx.excludes);
         let total = files.len() as u64;
         let mut scanned = 0u64;
 

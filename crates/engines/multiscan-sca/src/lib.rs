@@ -18,7 +18,7 @@ use multiscan_core::{
     Location, NetworkImpact, RawFinding, Remediation, Severity,
 };
 use multiscan_engine::{
-    Applicability, Engine, EngineError, EngineOutcome, FindingSink, ScanContext,
+    Applicability, Engine, EngineError, EngineOutcome, FindingSink, PathFilter, ScanContext,
 };
 
 pub use lockfile::ResolvedPackage;
@@ -83,11 +83,13 @@ impl Default for ScaEngine {
 /// Resolve the full package inventory under `root` — every package in every
 /// recognized lockfile, deduplicated by purl and sorted. This is the source
 /// for the CycloneDX SBOM (spec 12); it needs no OSV snapshot. Unparseable
-/// lockfiles are skipped rather than failing the inventory.
-pub fn resolve_inventory(root: &Path) -> Vec<ResolvedPackage> {
+/// lockfiles are skipped rather than failing the inventory. `excludes` is the
+/// same filter the scan ran with, so the SBOM never inventories what the
+/// scan was told not to look at.
+pub fn resolve_inventory(root: &Path, excludes: &PathFilter) -> Vec<ResolvedPackage> {
     let mut by_purl: std::collections::BTreeMap<String, ResolvedPackage> =
         std::collections::BTreeMap::new();
-    for (abs, _rel, name) in find_lockfiles(root) {
+    for (abs, _rel, name) in find_lockfiles(root, excludes) {
         let Some(parse) = lockfile::parser_for(&name) else {
             continue;
         };
@@ -106,9 +108,10 @@ pub fn resolve_inventory(root: &Path) -> Vec<ResolvedPackage> {
     by_purl.into_values().collect()
 }
 
-/// Find lockfiles under `root`, bounded and skipping heavy vendor dirs.
+/// Find lockfiles under `root`, bounded and skipping heavy vendor dirs and
+/// configured excludes (`[scan] exclude` plus `[scan.sca] exclude`, ADR 0004).
 /// Returns (absolute path, root-relative POSIX path, file name), sorted.
-fn find_lockfiles(root: &Path) -> Vec<(PathBuf, String, String)> {
+fn find_lockfiles(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, String)> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     let mut visited = 0usize;
@@ -124,17 +127,20 @@ fn find_lockfiles(root: &Path) -> Vec<(PathBuf, String, String)> {
             }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if excludes.is_excluded(Layer::Sca, &rel) {
+                continue; // matched dirs prune the walk, matched files skip
+            }
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 if matches!(name.as_str(), ".git" | "node_modules" | "target" | ".venv") {
                     continue;
                 }
                 stack.push(path);
             } else if lockfile::SUPPORTED_FILES.contains(&name.as_str()) {
-                let rel = path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
                 found.push((path, rel, name));
             }
         }
@@ -203,7 +209,7 @@ impl Engine for ScaEngine {
 
     fn applicable(&self, ctx: &ScanContext) -> Applicability {
         // Cheap: bounded existence check for any supported lockfile name.
-        if find_lockfiles(&ctx.root).is_empty() {
+        if find_lockfiles(&ctx.root, &ctx.excludes).is_empty() {
             Applicability::NotApplicable
         } else {
             Applicability::Applicable
@@ -216,7 +222,7 @@ impl Engine for ScaEngine {
         sink: &mut dyn FindingSink,
     ) -> Result<EngineOutcome, EngineError> {
         let index = OsvIndex::load(ctx);
-        let lockfiles = find_lockfiles(&ctx.root);
+        let lockfiles = find_lockfiles(&ctx.root, &ctx.excludes);
         let total = lockfiles.len() as u64;
         let mut scanned = 0u64;
         let mut degraded: Option<String> = None;

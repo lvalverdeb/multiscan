@@ -123,6 +123,13 @@ pub struct ScanArgs {
     #[arg(long)]
     pub min_severity: Option<String>,
 
+    /// Exclude glob, matched against the root-relative POSIX path; a pattern
+    /// matching a directory prunes the walk beneath it. Repeatable. Overrides
+    /// the config file's global `[scan] exclude` list (spec 4.5 precedence);
+    /// per-layer `[scan.<layer>] exclude` lists still apply.
+    #[arg(long, value_name = "GLOB")]
+    pub exclude: Vec<String>,
+
     /// Config file (default: ./multiscan.toml discovered upward).
     #[arg(long)]
     pub config: Option<PathBuf>,

@@ -9,6 +9,7 @@
 //! (R-4); the spec 6.1 `&'static str` spelling is realised as owned fields
 //! constructed once per engine instance.
 
+mod pathfilter;
 mod registry;
 pub mod testkit;
 
@@ -18,6 +19,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 pub use multiscan_core::{EngineManifest, Layer, Profile, RawFinding};
+pub use pathfilter::{PathFilter, PathFilterError};
 pub use registry::{EngineRun, Registry};
 
 /// Immutable inputs to a Scan (spec 2). Time is injected here — pure crates
@@ -28,6 +30,11 @@ pub struct ScanContext {
     pub root: PathBuf,
     /// Resolved configuration (flags > file > defaults, spec 4.5).
     pub config: multiscan_core::Config,
+    /// Exclude globs compiled from `config` (`[scan] exclude` + per-layer,
+    /// ADR 0004). Engines MUST consult this during file discovery: skip
+    /// matched files, prune matched directories. Compiled at config
+    /// resolution so an invalid glob is exit 2, not an engine failure.
+    pub excludes: PathFilter,
     /// Active profile.
     pub profile: Profile,
     /// Layers selected for this scan (auto-detected or explicit).

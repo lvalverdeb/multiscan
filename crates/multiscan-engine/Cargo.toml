@@ -10,6 +10,10 @@ license.workspace = true
 multiscan-core.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+globset.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

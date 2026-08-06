@@ -186,6 +186,7 @@ pub fn test_context(layers: Vec<multiscan_core::Layer>) -> ScanContext {
             rules: None,
             suppress: vec![],
         },
+        excludes: crate::PathFilter::empty(),
         profile: multiscan_core::Profile::Standard,
         layers,
         feed_snapshot_id: None,

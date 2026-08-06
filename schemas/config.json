@@ -19,6 +19,14 @@
         { "description": "Minimum severity that fails the gate.", "$ref": "#/definitions/Severity" }
       ]
     },
+    "LayerScanConfig": {
+      "description": "Per-layer overrides ([scan.<layer>] sections, ADR 0004). A layer's exclude list extends the global [scan] exclude for that layer's engines only.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exclude": { "description": "Additional glob patterns excluded for this layer only. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it.", "type": "array", "items": { "type": "string" } }
+      }
+    },
     "ScanConfig": {
       "description": "[scan] section (spec 4.5).",
       "type": "object",
@@ -26,7 +34,10 @@
       "properties": {
         "layers": { "description": "Layers to run; default auto-detect.", "type": "array", "items": { "$ref": "#/definitions/Layer" } },
         "profile": { "description": "Scan profile; default standard.", "$ref": "#/definitions/Profile" },
-        "exclude": { "description": "Glob patterns to exclude. Committable, machine-independent (CLI-007).", "type": "array", "items": { "type": "string" } }
+        "exclude": { "description": "Glob patterns to exclude, all layers. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it. Committable, machine-independent (CLI-007).", "type": "array", "items": { "type": "string" } },
+        "sca": { "description": "SCA-layer overrides ([scan.sca]).", "$ref": "#/definitions/LayerScanConfig" },
+        "secrets": { "description": "Secrets-layer overrides ([scan.secrets]).", "$ref": "#/definitions/LayerScanConfig" },
+        "iac": { "description": "IaC-layer overrides ([scan.iac]).", "$ref": "#/definitions/LayerScanConfig" }
       }
     },
     "GateConfig": {

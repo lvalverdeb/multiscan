@@ -17,7 +17,7 @@ use multiscan_core::{
     Location, NetworkImpact, RawFinding, Severity,
 };
 use multiscan_engine::{
-    Applicability, Engine, EngineError, EngineOutcome, FindingSink, ScanContext,
+    Applicability, Engine, EngineError, EngineOutcome, FindingSink, PathFilter, ScanContext,
 };
 
 pub use policy::{Condition, Policy};
@@ -128,7 +128,9 @@ fn classify(file_name: &str) -> Option<Kind> {
     }
 }
 
-fn find_files(root: &Path) -> Vec<(PathBuf, String, Kind)> {
+/// IaC files under `root`, skipping VCS/vendor dirs and configured excludes
+/// (`[scan] exclude` plus `[scan.iac] exclude`, ADR 0004).
+fn find_files(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, Kind)> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     let mut visited = 0usize;
@@ -144,17 +146,20 @@ fn find_files(root: &Path) -> Vec<(PathBuf, String, Kind)> {
             }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if excludes.is_excluded(Layer::Iac, &rel) {
+                continue; // matched dirs prune the walk, matched files skip
+            }
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 if matches!(name.as_str(), ".git" | "node_modules" | "target" | ".venv") {
                     continue;
                 }
                 stack.push(path);
             } else if let Some(kind) = classify(&name) {
-                let rel = path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
                 found.push((path, rel, kind));
             }
         }
@@ -169,7 +174,7 @@ impl Engine for IacEngine {
     }
 
     fn applicable(&self, ctx: &ScanContext) -> Applicability {
-        if find_files(&ctx.root).is_empty() {
+        if find_files(&ctx.root, &ctx.excludes).is_empty() {
             Applicability::NotApplicable
         } else {
             Applicability::Applicable
@@ -181,7 +186,7 @@ impl Engine for IacEngine {
         ctx: &ScanContext,
         sink: &mut dyn FindingSink,
     ) -> Result<EngineOutcome, EngineError> {
-        let files = find_files(&ctx.root);
+        let files = find_files(&ctx.root, &ctx.excludes);
         let total = files.len() as u64;
         let mut scanned = 0u64;
         let mut degraded: Option<String> = None;
