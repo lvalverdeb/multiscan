@@ -1,6 +1,6 @@
 {
   "pack_id": "cis-core",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "policies": [
     {
       "id": "cis-aws-s3-public-acl",
@@ -51,6 +51,62 @@
       "compliance_controls": ["CIS-K8S-5.2.1"],
       "remediation": "Set securityContext.privileged to false.",
       "condition": { "op": "is_true", "attribute": "spec.securityContext.privileged" }
+    },
+    {
+      "id": "cis-docker-run-as-root",
+      "title": "Container's final stage runs as root",
+      "resource_kinds": ["dockerfile_stage"],
+      "severity": "medium",
+      "cwe": ["CWE-250"],
+      "compliance_controls": ["CIS-DOCKER-4.1", "NIST-800-53-AC-6"],
+      "remediation": "Add a non-root USER instruction to the final build stage.",
+      "condition": {
+        "op": "all",
+        "conditions": [
+          { "op": "is_true", "attribute": "is_final_stage" },
+          { "op": "is_true", "attribute": "effective_user_root" }
+        ]
+      }
+    },
+    {
+      "id": "cis-docker-add-remote-url",
+      "title": "ADD fetches a remote URL",
+      "resource_kinds": ["dockerfile_stage"],
+      "severity": "medium",
+      "cwe": ["CWE-829"],
+      "compliance_controls": ["CIS-DOCKER-4.9"],
+      "remediation": "Use COPY for local files; fetch remote content with a verified checksum instead of ADD <url>.",
+      "condition": { "op": "is_true", "attribute": "adds_remote_url" }
+    },
+    {
+      "id": "cis-docker-curl-pipe-shell",
+      "title": "RUN pipes a network fetch into a shell",
+      "resource_kinds": ["dockerfile_stage"],
+      "severity": "high",
+      "cwe": ["CWE-494"],
+      "compliance_controls": ["NIST-800-53-SI-7"],
+      "remediation": "Download to a file, verify its checksum or signature, then execute; do not pipe curl/wget straight into sh.",
+      "condition": { "op": "is_true", "attribute": "curl_pipe_shell" }
+    },
+    {
+      "id": "cis-docker-secret-in-env",
+      "title": "Secret assigned in an ENV/ARG instruction",
+      "resource_kinds": ["dockerfile_stage"],
+      "severity": "high",
+      "cwe": ["CWE-798"],
+      "compliance_controls": ["CIS-DOCKER-4.10", "NIST-800-53-IA-5"],
+      "remediation": "Never bake secrets into image layers; use build secrets (--mount=type=secret) or runtime injection.",
+      "condition": { "op": "is_true", "attribute": "secret_in_env" }
+    },
+    {
+      "id": "cis-docker-floating-base-tag",
+      "title": "Base image uses a floating or missing tag",
+      "resource_kinds": ["dockerfile_stage"],
+      "severity": "low",
+      "cwe": ["CWE-1104"],
+      "compliance_controls": ["NIST-800-53-CM-2"],
+      "remediation": "Pin the base image to a specific version tag or digest for reproducible builds.",
+      "condition": { "op": "is_true", "attribute": "base_image_floating" }
     }
   ]
 }

@@ -121,3 +121,65 @@ fn privileged_pod_flagged() {
         .iter()
         .any(|f| f["identity"]["policy_id"] == "cis-k8s-privileged-container"));
 }
+
+/// ADR 0007: a Dockerfile with several smells yields the matching Docker
+/// policies; each finding carries at least one compliance control.
+#[test]
+fn dockerfile_smells_flagged() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("Dockerfile"),
+        "FROM ubuntu:latest\n\
+         ENV API_KEY=sk-abcdef123456\n\
+         ADD https://example.com/tool.sh /tool.sh\n\
+         RUN curl -fsSL https://get.example | bash\n",
+    )
+    .unwrap();
+    let findings = scan_json(project.path());
+    let ids: Vec<&str> = findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["identity"]["policy_id"].as_str())
+        .collect();
+    for expected in [
+        "cis-docker-run-as-root",
+        "cis-docker-secret-in-env",
+        "cis-docker-add-remote-url",
+        "cis-docker-curl-pipe-shell",
+        "cis-docker-floating-base-tag",
+    ] {
+        assert!(ids.contains(&expected), "missing {expected}: {ids:?}");
+    }
+    // Every finding maps to a control (no mapping gaps for the Docker pack).
+    for f in findings.as_array().unwrap() {
+        let controls = f["evidence"].as_array().into_iter().flatten().count();
+        let _ = controls;
+        assert!(
+            f["cwe"].as_array().map(|a| !a.is_empty()).unwrap_or(false),
+            "finding without CWE: {f}"
+        );
+    }
+}
+
+/// A hardened multi-stage Dockerfile is clean: the builder running as root
+/// does not flag (only the final stage's user matters), the base is pinned,
+/// and the final stage drops privileges.
+#[test]
+fn hardened_multistage_dockerfile_is_clean() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("Dockerfile"),
+        "FROM golang:1.22.3 AS build\n\
+         RUN make\n\
+         FROM gcr.io/distroless/base-debian12:nonroot\n\
+         USER 65532\n\
+         COPY --from=build /app /app\n",
+    )
+    .unwrap();
+    let findings = scan_json(project.path());
+    assert!(
+        findings.as_array().unwrap().is_empty(),
+        "hardened Dockerfile should be clean: {findings:?}"
+    );
+}

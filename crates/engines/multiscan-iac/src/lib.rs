@@ -5,6 +5,7 @@
 //! are data, not code (IAC-001); unresolved interpolations degrade to
 //! `Heuristic` rather than a silent pass (IAC-003).
 
+mod dockerfile;
 mod hcl_parse;
 mod k8s_parse;
 mod policy;
@@ -112,10 +113,11 @@ fn parse_severity(s: &str) -> Severity {
     }
 }
 
-/// A parseable IaC file: its parser and whether it is HCL or K8s.
+/// A parseable IaC file: its parser and whether it is HCL, K8s, or Dockerfile.
 enum Kind {
     Hcl,
     K8s,
+    Dockerfile,
 }
 
 fn classify(file_name: &str) -> Option<Kind> {
@@ -123,6 +125,8 @@ fn classify(file_name: &str) -> Option<Kind> {
         Some(Kind::Hcl)
     } else if file_name.ends_with(".yaml") || file_name.ends_with(".yml") {
         Some(Kind::K8s)
+    } else if dockerfile::is_dockerfile(file_name) {
+        Some(Kind::Dockerfile)
     } else {
         None
     }
@@ -211,6 +215,7 @@ impl Engine for IacEngine {
             let parsed = match kind {
                 Kind::Hcl => hcl_parse::parse(&text, &rel),
                 Kind::K8s => k8s_parse::parse(&text, &rel),
+                Kind::Dockerfile => dockerfile::parse(&text, &rel),
             };
             let resources = match parsed {
                 Ok(resources) => resources,
