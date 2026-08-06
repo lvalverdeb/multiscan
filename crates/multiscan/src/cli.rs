@@ -130,6 +130,12 @@ pub struct ScanArgs {
     #[arg(long, value_name = "GLOB")]
     pub exclude: Vec<String>,
 
+    /// Secrets layer: also scan git-history blobs — committed-then-removed
+    /// secrets are still live (ADR 0006). Requires the git CLI; bounded by
+    /// hard caps; degrades the scan (exit 3) if the root is not a git repo.
+    #[arg(long)]
+    pub history: bool,
+
     /// Config file (default: ./multiscan.toml discovered upward).
     #[arg(long)]
     pub config: Option<PathBuf>,

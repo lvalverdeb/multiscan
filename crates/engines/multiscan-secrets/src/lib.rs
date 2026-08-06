@@ -7,6 +7,7 @@
 
 mod entropy;
 mod fingerprint;
+mod history;
 mod noise;
 mod rules;
 
@@ -163,13 +164,64 @@ impl Engine for SecretsEngine {
             // fallback — their high-entropy content is checksums, not secrets.
             let entropy_enabled = !noise::entropy_noise_path(&rel)
                 && !ctx.excludes.is_entropy_excluded(&rel);
-            self.scan_text(&text, &rel, entropy_enabled, sink)
+            self.scan_text(&text, &rel, entropy_enabled, None, sink)
                 .map_err(|e| EngineError::Failed(e.to_string()))?;
         }
 
-        Ok(EngineOutcome::Complete {
-            units_scanned: scanned,
-        })
+        // Opt-in history pass (ADR 0006): committed-then-removed secrets are
+        // still live in every clone's object store. Same rules, same noise
+        // gating (by the blob's historical path); a missing git or non-repo
+        // root degrades to Partial — the user asked for coverage we could
+        // not provide, and that must not look like a clean scan.
+        let history_enabled = ctx
+            .config
+            .scan
+            .as_ref()
+            .and_then(|s| s.secrets.as_ref())
+            .and_then(|s| s.history)
+            .unwrap_or(false);
+        let mut degraded: Option<String> = None;
+        if history_enabled {
+            match history::enumerate(&ctx.root) {
+                Ok(history) => {
+                    for blob in &history.blobs {
+                        if ctx.should_stop() {
+                            return Ok(EngineOutcome::Partial {
+                                units_scanned: scanned,
+                                reason: "cancelled or past deadline".to_string(),
+                            });
+                        }
+                        if ctx.excludes.is_excluded(Layer::Secrets, &blob.path) {
+                            continue;
+                        }
+                        scanned += 1;
+                        sink.progress(scanned, None);
+                        let entropy_enabled = !noise::entropy_noise_path(&blob.path)
+                            && !ctx.excludes.is_entropy_excluded(&blob.path);
+                        self.scan_text(
+                            &blob.text,
+                            &blob.path,
+                            entropy_enabled,
+                            Some(&blob.oid_short),
+                            sink,
+                        )
+                        .map_err(|e| EngineError::Failed(e.to_string()))?;
+                    }
+                    degraded = history.truncated;
+                }
+                Err(reason) => degraded = Some(format!("history: {reason}")),
+            }
+        }
+
+        match degraded {
+            Some(reason) => Ok(EngineOutcome::Partial {
+                units_scanned: scanned,
+                reason,
+            }),
+            None => Ok(EngineOutcome::Complete {
+                units_scanned: scanned,
+            }),
+        }
     }
 }
 
@@ -179,6 +231,7 @@ impl SecretsEngine {
         text: &str,
         path: &str,
         entropy_enabled: bool,
+        history_oid: Option<&str>,
         sink: &mut dyn FindingSink,
     ) -> Result<(), multiscan_engine::SinkError> {
         for (idx, line) in text.lines().enumerate() {
@@ -205,6 +258,7 @@ impl SecretsEngine {
                         value,
                         path,
                         line_number,
+                        history_oid,
                     )?;
                 }
             }
@@ -236,6 +290,7 @@ impl SecretsEngine {
                             candidate,
                             path,
                             line_number,
+                            history_oid,
                         )?;
                     }
                 }
@@ -258,9 +313,17 @@ impl SecretsEngine {
         value: &str,
         path: &str,
         line: i64,
+        history_oid: Option<&str>,
     ) -> Result<(), multiscan_engine::SinkError> {
         let fingerprint = fingerprint(value);
         let masked = mask(value);
+        // Provenance for history hits (ADR 0006). The oid is public object
+        // metadata, never the secret (SEC-101); identity is untouched, so a
+        // secret still present in the tree merges with its history sighting.
+        let provenance = match history_oid {
+            Some(oid) => format!(" — in git history, blob {oid}"),
+            None => String::new(),
+        };
         sink.emit(RawFinding {
             identity: IdentityKey::ExposedSecret {
                 rule_id: rule_id.to_string(),
@@ -284,7 +347,9 @@ impl SecretsEngine {
             evidence: vec![Evidence {
                 kind: "secret_fingerprint".to_string(),
                 // Only the masked preview + fingerprint — never the value.
-                summary: format!("{description} `{masked}` (fingerprint {fingerprint})"),
+                summary: format!(
+                    "{description} `{masked}` (fingerprint {fingerprint}){provenance}"
+                ),
                 detail: serde_json::Map::new(),
                 dependency_path: vec![],
             }],

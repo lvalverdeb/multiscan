@@ -570,6 +570,16 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
     if !args.exclude.is_empty() {
         config.scan.get_or_insert_with(Default::default).exclude = args.exclude.clone();
     }
+    // --history switches the secrets history pass on (never off — the flag
+    // only adds coverage, so file config keeps working without it).
+    if args.history {
+        config
+            .scan
+            .get_or_insert_with(Default::default)
+            .secrets
+            .get_or_insert_with(Default::default)
+            .history = Some(true);
+    }
     // Compile exclude globs now so a bad pattern is a config error (exit 2),
     // whether it came from the file or the flag — never an engine failure.
     let excludes = match multiscan_engine::PathFilter::from_config(&config) {

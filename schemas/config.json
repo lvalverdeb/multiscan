@@ -28,12 +28,13 @@
       }
     },
     "SecretsScanConfig": {
-      "description": "[scan.secrets] overrides (ADR 0004, ADR 0005): the per-layer exclude plus entropy-noise control.",
+      "description": "[scan.secrets] overrides (ADR 0004, ADR 0005, ADR 0006): the per-layer exclude, entropy-noise control, and git-history opt-in.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "exclude": { "description": "Additional glob patterns excluded for the secrets layer only. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it.", "type": "array", "items": { "type": "string" } },
-        "entropy_exclude": { "description": "Globs where the high-entropy fallback is silenced; precise provider rules still run there. Extends the built-in known-noise list (lockfiles, IDE metadata, minified assets — ADR 0005).", "type": "array", "items": { "type": "string" } }
+        "entropy_exclude": { "description": "Globs where the high-entropy fallback is silenced; precise provider rules still run there. Extends the built-in known-noise list (lockfiles, IDE metadata, minified assets — ADR 0005).", "type": "array", "items": { "type": "string" } },
+        "history": { "description": "Also scan git-history blobs (ADR 0006): committed-then-removed secrets are still live. Opt-in; requires the git CLI; bounded by hard blob/size caps; degrades to Partial when the root is not a git repository.", "type": "boolean" }
       }
     },
     "ScanConfig": {
