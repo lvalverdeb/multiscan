@@ -335,7 +335,7 @@ Regex + Shannon entropy + structural validators, with an opt-in verification ste
 
 - SEC-101 Detected secret **values** MUST NOT be persisted or printed. Store type, location, and a truncated fingerprint only.
 - SEC-102 Live verification (checking whether a key is active) MUST be opt-in via `--verify-secrets`, MUST only call the issuing provider's documented validation endpoint, and MUST never call a target discovered from the scanned content.
-- SEC-103 Entropy-only detections MUST cap at `Medium` severity and `Heuristic` confidence.
+- SEC-103 Entropy-only detections MUST cap at `Medium` severity and `Heuristic` confidence. The entropy fallback is further bounded by the signal-quality rules (§13.3, FP-001/FP-002): it does not fire on known-noise files or content-address token shapes, and its noise controls never disable the precise provider rules.
 - SEC-104 Git history scanning is opt-in (`--scan-history`) with an explicit commit range.
 
 ## 7.3 `multiscan-iac`
@@ -550,6 +550,31 @@ pub trait Store {
 | NFR-008 | Zero-dependency execution | Static musl build runs on a `scratch` container |
 | NFR-009 | `unsafe` code | Zero in first-party crates; `#![forbid(unsafe_code)]` on every crate |
 | NFR-010 | Image layer extraction | Fuzzed; no path escape under any input |
+| NFR-011 | Signal quality | Per §13.3: false-positive control is a build-gated correctness property, not a polish item. |
+
+## 13.3 Signal Quality & False-Positive Control [NORMATIVE]
+
+For a scanner, signal quality *is* correctness. A report that cries wolf, or
+that buries a real finding under a flood of near-duplicates, fails the tool's
+purpose as surely as a missed vulnerability — and erodes the trust that makes
+any finding actionable. False-positive control is therefore a first-class
+normative property, gated in CI, not a refinement left to "later." The
+governing rule across heuristic tiers is **precision over recall**: a
+low-confidence heuristic must not degrade the usefulness of the
+high-confidence detections it accompanies.
+
+| ID | Rule |
+|---|---|
+| FP-001 | Heuristic detectors MUST be bounded on machine-generated content. The generic high-entropy secrets detector MUST NOT fire on known-noise files (lockfiles, IDE metadata, minified/generated assets) nor on content-address token shapes (hex digests at digest lengths, UUIDs, URL-embedded runs). Realized by ADR 0005. |
+| FP-002 | Noise controls MUST target the heuristic tier only. Silencing a `Heuristic`-confidence detection — by shape, path, or config — MUST NOT disable `Proven`/`Corroborated` detections in the same file; a real credential in a lockfile is still reported. Realized by ADR 0005. |
+| FP-003 | Every finding class MUST be suppressible by a committed, reviewable, expiring rule scoped by at least `(rule_id, path)`, so a *class* of false positive is retired in one entry without a baseline that grandfathers unrelated findings. The CLI-006 justification/approver/expires fields remain mandatory. Realized by ADR 0008. |
+| FP-004 | Human output (`table`, `markdown`) MUST collapse more than a threshold of findings sharing one rule and one file into a single counted row. Machine formats (`json`/`jsonl`/`sarif`) MUST retain every per-instance finding, so baseline diffing and dedup are unaffected. Realized by ADR 0006. |
+| FP-005 | Discovery MUST honor an explicit `.multiscanignore`. Reuse of the repository's `.gitignore` MUST be opt-in: a security scan MUST NOT skip a gitignored path (e.g. `.env`) by default. Realized by ADR 0009. |
+| FP-006 | A false positive is a correctness defect. The acceptance suite (§16) MUST carry, for each heuristic detector, a benign "quiet corpus" of realistic inputs that MUST produce zero findings; a change that makes the quiet corpus fire fails the build, tracked alongside the golden true-positive corpus. |
+
+Configurable thresholds and lists (FP-001, FP-004) have documented defaults; a
+deployment MAY tune them but MUST NOT be *required* to configure anything to
+get the default-safe behavior above.
 
 ---
 
@@ -624,6 +649,7 @@ phase_6_polish:
 | Safety negatives | Missing authorization, expired window, out-of-scope redirect, DNS drift, non-idempotent method in `standard` — each MUST block. Release-blocking. |
 | Network isolation | `--offline` tests run under a sandbox that fails the test on any syscall to the network (FR-011). |
 | Recall | `testdata/lab/` fixtures and locally-hosted deliberately-vulnerable apps on an isolated network. **Never** point tests at real or third-party hosts. |
+| Signal quality | Per §13.3 FP-006: a benign "quiet corpus" per heuristic detector that MUST yield zero findings. A regression that makes it fire is a build failure, tracked like the golden corpus. |
 | Performance | Benchmark suite gating NFR-001..005 in CI; regressions >15% fail. |
 | Supply chain | `cargo-deny` (licenses, advisories, bans) and `cargo-audit` on every build. We eat our own dog food. |
 
