@@ -20,9 +20,15 @@ pub enum Scheme {
     Apk,
     /// RPM (RHEL/Fedora/SUSE) — EVR ordering.
     Rpm,
+    /// RubyGems — `Gem::Version` ordering: alphanumeric segments, string
+    /// segments are pre-releases sorting below numeric ones.
+    RubyGems,
+    /// Packagist — Composer normalization: optional `v`, stability suffixes
+    /// dev < alpha < beta < RC < stable < patch.
+    Composer,
     /// Fallback: dotted numeric segments, then lexical. Used where a precise
-    /// scheme is not yet wired (Maven/RubyGems/etc. get dedicated schemes as
-    /// their fixtures land). Never a silent naive string compare.
+    /// scheme is not yet wired (Maven/etc. get dedicated schemes as their
+    /// fixtures land). Never a silent naive string compare.
     Generic,
 }
 
@@ -38,6 +44,8 @@ impl Scheme {
             "Debian" | "Ubuntu" => Scheme::Debian,
             "Alpine" => Scheme::Apk,
             "Red Hat" | "Rocky Linux" | "AlmaLinux" | "openSUSE" | "SUSE" | "Fedora" => Scheme::Rpm,
+            "RubyGems" => Scheme::RubyGems,
+            "Packagist" => Scheme::Composer,
             _ => Scheme::Generic,
         }
     }
@@ -52,9 +60,119 @@ impl Scheme {
             Scheme::Debian => cmp_with(a, b, parse_debian),
             Scheme::Apk => cmp_apk(a, b),
             Scheme::Rpm => cmp_rpm(a, b),
+            Scheme::RubyGems => cmp_rubygems(a, b),
+            Scheme::Composer => cmp_composer(a, b),
             Scheme::Generic => cmp_generic(a, b),
         }
     }
+}
+
+/// `Gem::Version` ordering. A version is a sequence of segments — numeric
+/// runs and letter runs (`-` reads as `.pre.`, per RubyGems). Comparison is
+/// segment-wise: numbers numerically, strings lexically, a string sorts
+/// below any number, and a missing segment is numeric zero — which makes
+/// `1.0.beta1 < 1.0 == 1.0.0` come out right.
+fn cmp_rubygems(a: &str, b: &str) -> Ordering {
+    #[derive(PartialEq, Eq, PartialOrd, Ord)]
+    enum Seg {
+        // Variant order is the ordering: pre-release strings below numbers.
+        Str(String),
+        Num(u64),
+    }
+    fn segments(v: &str) -> Vec<Seg> {
+        let lower = v.trim().to_ascii_lowercase().replace('-', ".pre.");
+        let mut out = Vec::new();
+        for run in lower
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|s| !s.is_empty())
+        {
+            // Split mixed runs like "beta1" into "beta", 1.
+            let mut rest = run;
+            while !rest.is_empty() {
+                let cut = rest
+                    .char_indices()
+                    .find(|(_, c)| c.is_ascii_digit() != rest.starts_with(|r: char| r.is_ascii_digit()))
+                    .map(|(i, _)| i)
+                    .unwrap_or(rest.len());
+                let (head, tail) = rest.split_at(cut);
+                out.push(match head.parse::<u64>() {
+                    Ok(n) => Seg::Num(n),
+                    Err(_) => Seg::Str(head.to_string()),
+                });
+                rest = tail;
+            }
+        }
+        out
+    }
+    let (sa, sb) = (segments(a), segments(b));
+    for i in 0..sa.len().max(sb.len()) {
+        let zero = Seg::Num(0);
+        let x = sa.get(i).unwrap_or(&zero);
+        let y = sb.get(i).unwrap_or(&zero);
+        match x.cmp(y) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    Ordering::Equal
+}
+
+/// Composer/Packagist ordering: optional leading `v`, dotted numerics, then
+/// a stability suffix ranking dev < alpha < beta < RC < stable < patch, each
+/// with an optional number (`1.0.0-RC2`). Mirrors Composer's normalized
+/// comparison closely enough for OSV range bounds, which are release-grade.
+fn cmp_composer(a: &str, b: &str) -> Ordering {
+    fn stability_rank(s: &str) -> i32 {
+        match s {
+            "dev" => 0,
+            "a" | "alpha" => 1,
+            "b" | "beta" => 2,
+            "rc" => 3,
+            "p" | "pl" | "patch" => 5,
+            _ => 4, // unknown suffixes treated as stable-adjacent
+        }
+    }
+    fn parts(v: &str) -> (Vec<u64>, i32, u64) {
+        let lower = v.trim().to_ascii_lowercase();
+        let lower = lower.strip_prefix('v').unwrap_or(&lower);
+        // `dev-master`-style branch versions: no numeric part, rank dev.
+        if lower.starts_with("dev-") {
+            return (vec![], 0, 0);
+        }
+        let (head, suffix) = match lower.split_once(['-', '_', '+']) {
+            Some((h, s)) => (h, s),
+            None => (lower, ""),
+        };
+        let nums = head
+            .split('.')
+            .map(|n| n.parse::<u64>().unwrap_or(0))
+            .collect();
+        if suffix.is_empty() {
+            return (nums, 4, 0);
+        }
+        let digits_at = suffix
+            .char_indices()
+            .find(|(_, c)| c.is_ascii_digit())
+            .map(|(i, _)| i)
+            .unwrap_or(suffix.len());
+        let (word, num) = suffix.split_at(digits_at);
+        (
+            nums,
+            stability_rank(word.trim_matches(['-', '_', '.'])),
+            num.parse::<u64>().unwrap_or(0),
+        )
+    }
+    let (an, ar, anum) = parts(a);
+    let (bn, br, bnum) = parts(b);
+    for i in 0..an.len().max(bn.len()) {
+        let x = an.get(i).copied().unwrap_or(0);
+        let y = bn.get(i).copied().unwrap_or(0);
+        match x.cmp(&y) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    ar.cmp(&br).then(anum.cmp(&bnum))
 }
 
 fn parse_debian(v: &str) -> Option<debversion::Version> {
@@ -236,10 +354,40 @@ mod tests {
     }
 
     #[test]
+    fn rubygems_ordering() {
+        // Pre-release segments sort below the release.
+        assert_eq!(Scheme::RubyGems.compare("1.0.0.beta1", "1.0.0"), Less);
+        assert_eq!(Scheme::RubyGems.compare("1.0.0.beta1", "1.0.0.beta2"), Less);
+        assert_eq!(Scheme::RubyGems.compare("1.0.0.rc1", "1.0.0.beta9"), Greater);
+        // `-` reads as `.pre.`.
+        assert_eq!(Scheme::RubyGems.compare("1.0.0-alpha", "1.0.0"), Less);
+        // Numeric, not string.
+        assert_eq!(Scheme::RubyGems.compare("7.0.10", "7.0.9"), Greater);
+        // Trailing zeros are insignificant.
+        assert_eq!(Scheme::RubyGems.compare("1.0", "1.0.0"), Equal);
+    }
+
+    #[test]
+    fn composer_ordering() {
+        assert_eq!(Scheme::Composer.compare("v1.2.3", "1.2.3"), Equal);
+        assert_eq!(Scheme::Composer.compare("1.0.0-RC1", "1.0.0"), Less);
+        assert_eq!(Scheme::Composer.compare("1.0.0-rc1", "1.0.0-rc2"), Less);
+        assert_eq!(Scheme::Composer.compare("1.0.0-alpha1", "1.0.0-beta1"), Less);
+        assert_eq!(Scheme::Composer.compare("1.10.0", "1.9.9"), Greater);
+        // Branch versions rank as dev, below any numbered release.
+        assert_eq!(Scheme::Composer.compare("dev-master", "0.0.1"), Less);
+        // Patch releases order above the plain release.
+        assert_eq!(Scheme::Composer.compare("1.0.0-p1", "1.0.0"), Greater);
+    }
+
+    #[test]
     fn ecosystem_routing() {
         assert_eq!(Scheme::for_osv_ecosystem("crates.io"), Scheme::Semver);
         assert_eq!(Scheme::for_osv_ecosystem("PyPI"), Scheme::Pep440);
         assert_eq!(Scheme::for_osv_ecosystem("Maven"), Scheme::Generic);
+        assert_eq!(Scheme::for_osv_ecosystem("RubyGems"), Scheme::RubyGems);
+        assert_eq!(Scheme::for_osv_ecosystem("Packagist"), Scheme::Composer);
+        assert_eq!(Scheme::for_osv_ecosystem("Go"), Scheme::Semver);
         // OS ecosystems are release-qualified in OSV.
         assert_eq!(Scheme::for_osv_ecosystem("Debian:11"), Scheme::Debian);
         assert_eq!(Scheme::for_osv_ecosystem("Ubuntu:22.04"), Scheme::Debian);

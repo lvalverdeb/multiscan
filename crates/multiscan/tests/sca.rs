@@ -214,3 +214,129 @@ dependencies = [
     assert_eq!(f["remediation"]["fixed_version"], "3.2.15");
     assert_eq!(f["asset"]["identifier"], "pkg:pypi/django@3.2.14");
 }
+
+/// Seed a snapshot with one jsonl advisory blob per ecosystem.
+fn seed_ecosystems(cache: &Path, advisories: &[(&str, &str)]) {
+    let mut osv = BTreeMap::new();
+    let mut osv_counts = BTreeMap::new();
+    for (ecosystem, jsonl) in advisories {
+        osv.insert(ecosystem.to_string(), format!("{jsonl}\n").into_bytes());
+        osv_counts.insert(ecosystem.to_string(), jsonl.lines().count() as u64);
+    }
+    let data = SnapshotData {
+        kev_json: br#"{"vulnerabilities":[]}"#.to_vec(),
+        epss_csv: b"cve,epss,percentile\n".to_vec(),
+        osv_jsonl: osv,
+        counts: SnapshotCounts {
+            kev: 0,
+            epss: 0,
+            osv: osv_counts,
+        },
+        sources: BTreeMap::new(),
+    };
+    write_snapshot(cache, &data, Utc::now()).unwrap();
+}
+
+fn advisory_ids(findings: &serde_json::Value) -> Vec<String> {
+    findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["identity"]["advisory_id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// yarn.lock (classic v1) resolves npm advisories.
+#[test]
+fn yarn_lock_resolves_npm_advisory() {
+    let cache = tempfile::tempdir().unwrap();
+    seed_ecosystems(cache.path(), &[("npm", LODASH_ADVISORY)]);
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("yarn.lock"),
+        "# yarn lockfile v1\n\nlodash@^4.17.0:\n  version \"4.17.20\"\n",
+    )
+    .unwrap();
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(advisory_ids(&findings), vec!["GHSA-35jh-r3h4-6jhm"]);
+}
+
+/// go.sum resolves Go advisories: `v` prefix stripped, SemVer ordering.
+#[test]
+fn go_sum_resolves_go_advisory() {
+    let cache = tempfile::tempdir().unwrap();
+    let gin = r#"{"id":"GHSA-2c4m-59x9-fr2g","summary":"Improper input validation in gin","database_specific":{"severity":"MODERATE"},"affected":[{"package":{"ecosystem":"Go","name":"github.com/gin-gonic/gin"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.9.1"}]}]}]}"#;
+    seed_ecosystems(cache.path(), &[("Go", gin)]);
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("go.sum"),
+        "github.com/gin-gonic/gin v1.9.0 h1:aaaa=\n\
+         github.com/gin-gonic/gin v1.9.0/go.mod h1:bbbb=\n\
+         golang.org/x/text v0.13.0 h1:cccc=\n",
+    )
+    .unwrap();
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(advisory_ids(&findings), vec!["GHSA-2c4m-59x9-fr2g"]);
+    let f = &findings.as_array().unwrap()[0];
+    assert_eq!(f["remediation"]["fixed_version"], "1.9.1");
+    assert_eq!(
+        f["asset"]["identifier"],
+        "pkg:golang/github.com/gin-gonic/gin@1.9.0"
+    );
+}
+
+/// Gemfile.lock resolves RubyGems advisories with Gem::Version ordering —
+/// including a four-segment fix bound and a platform-suffixed install.
+#[test]
+fn gemfile_lock_resolves_rubygems_advisories() {
+    let cache = tempfile::tempdir().unwrap();
+    let rails = r#"{"id":"GHSA-rails-1","summary":"rails vuln","database_specific":{"severity":"HIGH"},"affected":[{"package":{"ecosystem":"RubyGems","name":"rails"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"7.0.0"},{"fixed":"7.0.4.1"}]}]}]}"#;
+    let nokogiri = r#"{"id":"GHSA-noko-1","summary":"nokogiri vuln","database_specific":{"severity":"HIGH"},"affected":[{"package":{"ecosystem":"RubyGems","name":"nokogiri"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.13.9"}]}]}]}"#;
+    seed_ecosystems(
+        cache.path(),
+        &[("RubyGems", &format!("{rails}\n{nokogiri}"))],
+    );
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("Gemfile.lock"),
+        "GEM\n  remote: https://rubygems.org/\n  specs:\n    nokogiri (1.13.8-x86_64-linux)\n    rails (7.0.4)\n\nDEPENDENCIES\n  rails\n",
+    )
+    .unwrap();
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    let mut ids = advisory_ids(&findings);
+    ids.sort();
+    assert_eq!(ids, vec!["GHSA-noko-1", "GHSA-rails-1"]);
+    // 7.0.4 < 7.0.4.1 under Gem::Version (a string compare would also say
+    // so, but 7.0.10 vs 7.0.9 would not — covered in the scheme unit tests).
+    let rails_f = findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["identity"]["advisory_id"] == "GHSA-rails-1")
+        .unwrap();
+    assert_eq!(rails_f["remediation"]["fixed_version"], "7.0.4.1");
+}
+
+/// composer.lock resolves Packagist advisories; `v` prefixes normalized.
+#[test]
+fn composer_lock_resolves_packagist_advisory() {
+    let cache = tempfile::tempdir().unwrap();
+    let monolog = r#"{"id":"GHSA-mono-1","summary":"monolog vuln","database_specific":{"severity":"MODERATE"},"affected":[{"package":{"ecosystem":"Packagist","name":"monolog/monolog"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"2.9.0"}]}]}]}"#;
+    seed_ecosystems(cache.path(), &[("Packagist", monolog)]);
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("composer.lock"),
+        r#"{"packages":[{"name":"monolog/monolog","version":"v2.8.0"}],"packages-dev":[]}"#,
+    )
+    .unwrap();
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(advisory_ids(&findings), vec!["GHSA-mono-1"]);
+    assert_eq!(
+        findings.as_array().unwrap()[0]["asset"]["identifier"],
+        "pkg:composer/monolog/monolog@2.8.0"
+    );
+}
