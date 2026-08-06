@@ -336,7 +336,7 @@ Regex + Shannon entropy + structural validators, with an opt-in verification ste
 - SEC-101 Detected secret **values** MUST NOT be persisted or printed. Store type, location, and a truncated fingerprint only.
 - SEC-102 Live verification (checking whether a key is active) MUST be opt-in via `--verify-secrets`, MUST only call the issuing provider's documented validation endpoint, and MUST never call a target discovered from the scanned content.
 - SEC-103 Entropy-only detections MUST cap at `Medium` severity and `Heuristic` confidence. The entropy fallback is further bounded by the signal-quality rules (§13.3, FP-001/FP-002): it does not fire on known-noise files or content-address token shapes, and its noise controls never disable the precise provider rules.
-- SEC-104 Git history scanning is opt-in (`--scan-history`) with an explicit commit range.
+- SEC-104 Git history scanning is opt-in (`--history`) and, by default, scans every object reachable from any ref — a committed-then-removed secret may reside in any commit. Bounded by hard blob/size caps, degrading to `Partial` on truncation (ADR 0006); an explicit commit-range/`--since` selector is a permitted future refinement, not a requirement. (Amended by ADR 0011 from the original `--scan-history` + mandatory-commit-range wording.)
 
 ## 7.3 `multiscan-iac`
 
