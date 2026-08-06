@@ -340,3 +340,104 @@ fn composer_lock_resolves_packagist_advisory() {
         "pkg:composer/monolog/monolog@2.8.0"
     );
 }
+
+/// Manifest fallback: a repo with only package.json still gets SCA coverage —
+/// an exact pin resolves against advisories.
+#[test]
+fn manifest_fallback_resolves_pinned_advisory() {
+    let cache = tempfile::tempdir().unwrap();
+    seed_snapshot(cache.path());
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"dependencies":{"lodash":"4.17.20"}}"#,
+    )
+    .unwrap();
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(advisory_ids(&findings), vec!["GHSA-35jh-r3h4-6jhm"]);
+}
+
+/// A range declaration is never silently skipped: it surfaces as the SCA-001
+/// unpinned finding (Informational/Unconfirmed).
+#[test]
+fn manifest_range_emits_unpinned_declaration() {
+    let cache = tempfile::tempdir().unwrap();
+    seed_snapshot(cache.path());
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"dependencies":{"lodash":"^4.17.0"}}"#,
+    )
+    .unwrap();
+    let (_out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    let arr = findings.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["identity"]["advisory_id"], "native:sca:unpinned");
+    assert_eq!(arr[0]["severity"], "informational");
+    assert_eq!(arr[0]["confidence"], "unconfirmed");
+}
+
+/// Shadowing: with a lockfile present the manifest is not parsed — the
+/// lock's patched resolution wins over the manifest's vulnerable range.
+#[test]
+fn lockfile_shadows_manifest_in_same_dir() {
+    let cache = tempfile::tempdir().unwrap();
+    seed_snapshot(cache.path());
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"dependencies":{"lodash":"4.17.20"}}"#,
+    )
+    .unwrap();
+    write_package_lock(project.path(), "4.17.21"); // patched resolution
+    let (_out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert!(
+        findings.as_array().unwrap().is_empty(),
+        "manifest must be shadowed by its lockfile: {findings:?}"
+    );
+}
+
+/// Workspace shadowing: a member Cargo.toml is shadowed by the root
+/// Cargo.lock one directory up.
+#[test]
+fn workspace_root_lock_shadows_member_manifest() {
+    let cache = tempfile::tempdir().unwrap();
+    seed_snapshot(cache.path());
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("Cargo.lock"),
+        "version = 3\n[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir(project.path().join("member")).unwrap();
+    std::fs::write(
+        project.path().join("member/Cargo.toml"),
+        "[dependencies]\nserde = \"1\"\n",
+    )
+    .unwrap();
+    let (_out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    // The member manifest would emit an unpinned finding if parsed; the
+    // root lock shadows it and itself matches no advisory.
+    assert!(
+        findings.as_array().unwrap().is_empty(),
+        "ancestor lock must shadow member manifest: {findings:?}"
+    );
+}
+
+/// go.mod fallback: pinned requires resolve, `// indirect` drives evidence.
+#[test]
+fn go_mod_fallback_resolves_with_directness() {
+    let cache = tempfile::tempdir().unwrap();
+    let gin = r#"{"id":"GHSA-2c4m-59x9-fr2g","summary":"gin vuln","database_specific":{"severity":"MODERATE"},"affected":[{"package":{"ecosystem":"Go","name":"github.com/gin-gonic/gin"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.9.1"}]}]}]}"#;
+    seed_ecosystems(cache.path(), &[("Go", gin)]);
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("go.mod"),
+        "module example.com/app\n\ngo 1.22\n\nrequire github.com/gin-gonic/gin v1.9.0\n",
+    )
+    .unwrap();
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(advisory_ids(&findings), vec!["GHSA-2c4m-59x9-fr2g"]);
+}

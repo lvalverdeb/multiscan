@@ -45,6 +45,14 @@ pub fn parser_for(file_name: &str) -> Option<ParseFn> {
         "poetry.lock" => Some(parse_poetry_lock),
         "Gemfile.lock" => Some(parse_gemfile_lock),
         "composer.lock" => Some(parse_composer_lock),
+        // Manifests: parsed only as fallback when their lockfile is absent
+        // (see `shadowing_lockfiles`); ranges surface as SCA-001 unpinned.
+        "package.json" => Some(parse_package_json),
+        "pyproject.toml" => Some(parse_pyproject),
+        "go.mod" => Some(parse_go_mod),
+        "Gemfile" => Some(parse_gemfile),
+        "composer.json" => Some(parse_composer_json),
+        "Cargo.toml" => Some(parse_cargo_manifest),
         _ => None,
     }
 }
@@ -62,7 +70,40 @@ pub const SUPPORTED_FILES: &[&str] = &[
     "poetry.lock",
     "Gemfile.lock",
     "composer.lock",
+    "package.json",
+    "pyproject.toml",
+    "go.mod",
+    "Gemfile",
+    "composer.json",
+    "Cargo.toml",
 ];
+
+/// Lockfiles that make a manifest redundant. A manifest is a *fallback*: if
+/// any of these exists in the manifest's directory or an ancestor (workspace
+/// roots hold the lock for member manifests — Cargo, Go), the lockfile's
+/// exact resolutions win and the manifest is not parsed, so a repo is never
+/// double-reported.
+pub fn shadowing_lockfiles(manifest: &str) -> &'static [&'static str] {
+    match manifest {
+        "package.json" => &[
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+        ],
+        "pyproject.toml" => &["uv.lock", "poetry.lock"],
+        "go.mod" => &["go.sum"],
+        "Gemfile" => &["Gemfile.lock"],
+        "composer.json" => &["composer.lock"],
+        "Cargo.toml" => &["Cargo.lock"],
+        _ => &[],
+    }
+}
+
+/// Whether this file name is a manifest (fallback-only input).
+pub fn is_manifest(file_name: &str) -> bool {
+    !shadowing_lockfiles(file_name).is_empty()
+}
 
 // ---- Cargo.lock ----
 
@@ -557,6 +598,320 @@ fn parse_composer_lock(text: &str) -> Result<Vec<ResolvedPackage>, String> {
         .collect())
 }
 
+// ---- Manifests (fallback when no lockfile shadows them) ----
+//
+// Manifests declare ranges, not resolutions. An exact declaration becomes a
+// resolvable package; anything else is recorded without a version so the
+// engine emits the SCA-001 unpinned finding instead of silently skipping.
+
+fn manifest_package(
+    ecosystem: &str,
+    purl_type: &str,
+    name: &str,
+    version: Option<String>,
+    direct: bool,
+) -> ResolvedPackage {
+    ResolvedPackage {
+        ecosystem: ecosystem.to_string(),
+        purl_type: purl_type.to_string(),
+        name: name.to_string(),
+        version,
+        direct,
+    }
+}
+
+// ---- package.json ----
+
+#[derive(Deserialize)]
+struct NpmManifest {
+    #[serde(default)]
+    dependencies: std::collections::BTreeMap<String, String>,
+    #[serde(default, rename = "devDependencies")]
+    dev_dependencies: std::collections::BTreeMap<String, String>,
+    #[serde(default, rename = "optionalDependencies")]
+    optional_dependencies: std::collections::BTreeMap<String, String>,
+}
+
+fn parse_package_json(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let manifest: NpmManifest =
+        serde_json::from_str(text).map_err(|e| format!("package.json: {e}"))?;
+    let mut out = Vec::new();
+    for (name, spec) in manifest
+        .dependencies
+        .iter()
+        .chain(&manifest.dev_dependencies)
+        .chain(&manifest.optional_dependencies)
+    {
+        // Non-registry specifiers are the user's own or unresolvable here.
+        if spec.starts_with("file:")
+            || spec.starts_with("link:")
+            || spec.starts_with("workspace:")
+            || spec.starts_with("git")
+            || spec.starts_with("http")
+            || spec.starts_with("github:")
+        {
+            continue;
+        }
+        // npm: a bare version is an exact pin; anything else is a range.
+        let version = semver::Version::parse(spec).ok().map(|v| v.to_string());
+        out.push(manifest_package("npm", "npm", name, version, true));
+    }
+    Ok(out)
+}
+
+// ---- pyproject.toml (PEP 621 [project] and [tool.poetry]) ----
+
+/// One PEP 508 requirement string → package. `flask[async]==2.3.2; marker`
+/// pins; `requests>=2,<3` records unpinned.
+fn pep508_package(spec: &str) -> Option<ResolvedPackage> {
+    let spec = spec.split(';').next().unwrap_or("").trim();
+    if spec.is_empty() {
+        return None;
+    }
+    let name = spec
+        .split(['[', '<', '>', '=', '!', '~', ' ', '('])
+        .next()
+        .unwrap_or("")
+        .trim();
+    if name.is_empty() {
+        return None;
+    }
+    let version = spec.split_once("==").and_then(|(_, v)| {
+        let v = v.trim().trim_end_matches(')');
+        let v = v.split([',', ' ']).next().unwrap_or("");
+        // `==1.2.*` is still a range.
+        (!v.is_empty() && !v.contains('*')).then(|| v.to_string())
+    });
+    Some(manifest_package("PyPI", "pypi", name, version, true))
+}
+
+/// A poetry constraint (`"1.2.3"` exact, `"^1.2"`/`"*"` range) → version.
+fn poetry_exact(constraint: &str) -> Option<String> {
+    let v = constraint.trim();
+    (!v.is_empty()
+        && v.chars().next().is_some_and(|c| c.is_ascii_digit())
+        && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '.'))
+    .then(|| v.to_string())
+}
+
+fn parse_pyproject(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let doc: toml::Value = toml::from_str(text).map_err(|e| format!("pyproject.toml: {e}"))?;
+    let mut out = Vec::new();
+
+    // PEP 621: [project] dependencies + [project.optional-dependencies].
+    if let Some(project) = doc.get("project") {
+        let groups = project
+            .get("dependencies")
+            .into_iter()
+            .chain(
+                project
+                    .get("optional-dependencies")
+                    .and_then(|t| t.as_table())
+                    .into_iter()
+                    .flat_map(|t| t.values()),
+            );
+        for group in groups {
+            for spec in group.as_array().into_iter().flatten() {
+                if let Some(pkg) = spec.as_str().and_then(pep508_package) {
+                    out.push(pkg);
+                }
+            }
+        }
+    }
+
+    // Poetry: [tool.poetry.dependencies] and [tool.poetry.group.*.dependencies].
+    if let Some(poetry) = doc.get("tool").and_then(|t| t.get("poetry")) {
+        let group_tables = poetry
+            .get("group")
+            .and_then(|g| g.as_table())
+            .into_iter()
+            .flat_map(|groups| groups.values())
+            .filter_map(|g| g.get("dependencies"));
+        for table in poetry.get("dependencies").into_iter().chain(group_tables) {
+            let Some(table) = table.as_table() else { continue };
+            for (name, constraint) in table {
+                if name == "python" {
+                    continue;
+                }
+                let version = match constraint {
+                    toml::Value::String(s) => poetry_exact(s),
+                    toml::Value::Table(t) => {
+                        // Local/git sources are not registry packages.
+                        if t.contains_key("path") || t.contains_key("git") {
+                            continue;
+                        }
+                        t.get("version").and_then(|v| v.as_str()).and_then(poetry_exact)
+                    }
+                    _ => None,
+                };
+                out.push(manifest_package("PyPI", "pypi", name, version, true));
+            }
+        }
+    }
+    Ok(out)
+}
+
+// ---- go.mod (require directives; `// indirect` marks transitives) ----
+
+fn go_mod_entry(code: &str, comment: &str) -> Option<ResolvedPackage> {
+    let mut fields = code.split_whitespace();
+    let (module, version) = (fields.next()?, fields.next()?);
+    let version = version.strip_prefix('v')?;
+    Some(manifest_package(
+        "Go",
+        "golang",
+        module,
+        Some(version.to_string()),
+        !comment.contains("indirect"),
+    ))
+}
+
+fn parse_go_mod(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let mut out = Vec::new();
+    let mut block: Option<&str> = None;
+    for line in text.lines() {
+        let (code, comment) = line.split_once("//").unwrap_or((line, ""));
+        let code = code.trim();
+        if let Some(kind) = block {
+            if code == ")" {
+                block = None;
+            } else if kind == "require" && !code.is_empty() {
+                out.extend(go_mod_entry(code, comment));
+            }
+            continue;
+        }
+        for kind in ["require", "exclude", "replace", "retract"] {
+            if let Some(rest) = code.strip_prefix(kind) {
+                let rest = rest.trim();
+                if rest == "(" {
+                    block = Some(kind);
+                } else if kind == "require" {
+                    out.extend(go_mod_entry(rest, comment));
+                }
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
+// ---- Gemfile (gem "name", "constraint" lines; no regex, hand-tokenized) ----
+
+/// Quoted strings in a Gemfile argument list, in order.
+fn quoted_args(rest: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut chars = rest.char_indices();
+    while let Some((start, c)) = chars.next() {
+        if c == '"' || c == '\'' {
+            if let Some(len) = rest[start + 1..].find(c) {
+                out.push(&rest[start + 1..start + 1 + len]);
+                // Skip past the closing quote.
+                for _ in 0..len + 1 {
+                    chars.next();
+                }
+            }
+        }
+    }
+    out
+}
+
+fn parse_gemfile(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let Some(rest) = line.strip_prefix("gem ").or_else(|| line.strip_prefix("gem(")) else {
+            continue;
+        };
+        // path:/git:/github: gems are not registry-resolvable.
+        if ["path:", "git:", "github:", ":path", ":git", ":github"]
+            .iter()
+            .any(|k| rest.contains(k))
+        {
+            continue;
+        }
+        let args = quoted_args(rest);
+        let Some(name) = args.first().filter(|n| !n.is_empty()) else {
+            continue;
+        };
+        // Exact only when a constraint is a bare version (no operator).
+        let version = args
+            .get(1)
+            .filter(|v| {
+                v.chars().next().is_some_and(|c| c.is_ascii_digit())
+                    && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '.')
+            })
+            .map(|v| v.to_string());
+        out.push(manifest_package("RubyGems", "gem", name, version, true));
+    }
+    Ok(out)
+}
+
+// ---- composer.json (require + require-dev; platform packages skipped) ----
+
+#[derive(Deserialize)]
+struct ComposerManifest {
+    #[serde(default)]
+    require: std::collections::BTreeMap<String, String>,
+    #[serde(default, rename = "require-dev")]
+    require_dev: std::collections::BTreeMap<String, String>,
+}
+
+fn parse_composer_json(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let manifest: ComposerManifest =
+        serde_json::from_str(text).map_err(|e| format!("composer.json: {e}"))?;
+    let mut out = Vec::new();
+    for (name, constraint) in manifest.require.iter().chain(&manifest.require_dev) {
+        // `php` and ext-*/lib-* are platform requirements, not packages.
+        if name == "php" || name.starts_with("ext-") || name.starts_with("lib-") {
+            continue;
+        }
+        let v = constraint.trim().trim_start_matches('v');
+        let version = (v.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && v.chars().all(|c| c.is_ascii_digit() || c == '.'))
+        .then(|| v.to_string());
+        out.push(manifest_package("Packagist", "composer", name, version, true));
+    }
+    Ok(out)
+}
+
+// ---- Cargo.toml ([dependencies] & friends; caret semantics ⇒ `=` pins) ----
+
+fn parse_cargo_manifest(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let doc: toml::Value = toml::from_str(text).map_err(|e| format!("Cargo.toml: {e}"))?;
+    let mut out = Vec::new();
+    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        let Some(table) = doc.get(section).and_then(|v| v.as_table()) else {
+            continue;
+        };
+        for (key, spec) in table {
+            let (name, requirement) = match spec {
+                toml::Value::String(req) => (key.as_str(), Some(req.as_str())),
+                toml::Value::Table(t) => {
+                    // Local/git/workspace-inherited deps are not registry input.
+                    if t.contains_key("path")
+                        || t.contains_key("git")
+                        || t.contains_key("workspace")
+                    {
+                        continue;
+                    }
+                    (
+                        // `foo = { package = "bar" }` renames; `bar` is real.
+                        t.get("package").and_then(|p| p.as_str()).unwrap_or(key),
+                        t.get("version").and_then(|v| v.as_str()),
+                    )
+                }
+                _ => continue,
+            };
+            // Cargo's bare `1.2.3` means `^1.2.3` — only `=1.2.3` is exact.
+            let version = requirement
+                .and_then(|r| r.trim().strip_prefix('='))
+                .map(|v| v.trim().to_string());
+            out.push(manifest_package("crates.io", "cargo", name, version, true));
+        }
+    }
+    Ok(out)
+}
+
 // ---- requirements.txt (pinned lines only; SCA-001 for the rest) ----
 
 fn parse_requirements_txt(text: &str) -> Result<Vec<ResolvedPackage>, String> {
@@ -864,6 +1219,155 @@ DEPENDENCIES
         // Transitive constraint lines (indent 6) are not packages.
         assert!(!pkgs.iter().find(|p| p.name == "racc").unwrap().direct);
         assert_eq!(pkgs.iter().filter(|p| p.name == "racc").count(), 1);
+    }
+
+    #[test]
+    fn package_json_exact_vs_range() {
+        let text = r#"{
+          "dependencies": { "lodash": "4.17.20", "react": "^18.2.0", "local": "file:../local" },
+          "devDependencies": { "jest": "~29.0.0" }
+        }"#;
+        let pkgs = parse_package_json(text).unwrap();
+        assert_eq!(pkgs.len(), 3, "file: dep skipped");
+        let lodash = pkgs.iter().find(|p| p.name == "lodash").unwrap();
+        assert_eq!(lodash.version.as_deref(), Some("4.17.20"));
+        assert!(lodash.direct);
+        // Ranges are recorded unpinned (SCA-001), never dropped.
+        assert!(pkgs.iter().find(|p| p.name == "react").unwrap().version.is_none());
+        assert!(pkgs.iter().find(|p| p.name == "jest").unwrap().version.is_none());
+    }
+
+    #[test]
+    fn pyproject_pep621_and_poetry() {
+        let text = r#"
+[project]
+dependencies = ["flask==2.3.2", "requests>=2,<3", "uvicorn[standard]==0.23.1; python_version > '3.8'"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+django = "4.2.3"
+celery = { version = "^5.3", extras = ["redis"] }
+mylib = { path = "../mylib" }
+"#;
+        let pkgs = parse_pyproject(text).unwrap();
+        assert!(pkgs.iter().all(|p| p.name != "python" && p.name != "mylib"));
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "flask").unwrap().version.as_deref(),
+            Some("2.3.2")
+        );
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "uvicorn").unwrap().version.as_deref(),
+            Some("0.23.1")
+        );
+        assert!(pkgs.iter().find(|p| p.name == "requests").unwrap().version.is_none());
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "django").unwrap().version.as_deref(),
+            Some("4.2.3")
+        );
+        assert!(pkgs.iter().find(|p| p.name == "celery").unwrap().version.is_none());
+    }
+
+    #[test]
+    fn go_mod_blocks_directness_and_other_directives() {
+        let text = "\
+module example.com/app
+
+go 1.22
+
+require (
+\tgithub.com/gin-gonic/gin v1.9.0
+\tgolang.org/x/text v0.13.0 // indirect
+)
+
+require github.com/single/dep v1.0.0
+
+replace (
+\texample.com/old => example.com/new v9.9.9
+)
+";
+        let pkgs = parse_go_mod(text).unwrap();
+        assert_eq!(pkgs.len(), 3, "replace block must not contribute");
+        let gin = pkgs.iter().find(|p| p.name == "github.com/gin-gonic/gin").unwrap();
+        assert_eq!(gin.version.as_deref(), Some("1.9.0"));
+        assert!(gin.direct);
+        assert!(!pkgs.iter().find(|p| p.name == "golang.org/x/text").unwrap().direct);
+        assert!(pkgs.iter().find(|p| p.name == "github.com/single/dep").unwrap().direct);
+    }
+
+    #[test]
+    fn gemfile_constraints_and_sources() {
+        let text = "\
+source 'https://rubygems.org'
+
+gem 'rails', '7.0.4'
+gem \"nokogiri\", \">= 1.13\"
+gem 'internal', path: '../internal'
+gem 'unconstrained'
+";
+        let pkgs = parse_gemfile(text).unwrap();
+        assert_eq!(pkgs.len(), 3, "path: gem skipped");
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "rails").unwrap().version.as_deref(),
+            Some("7.0.4")
+        );
+        assert!(pkgs.iter().find(|p| p.name == "nokogiri").unwrap().version.is_none());
+        assert!(pkgs.iter().find(|p| p.name == "unconstrained").unwrap().version.is_none());
+    }
+
+    #[test]
+    fn composer_json_platform_and_pins() {
+        let text = r#"{
+          "require": { "php": ">=8.1", "ext-mbstring": "*", "monolog/monolog": "2.8.0" },
+          "require-dev": { "phpunit/phpunit": "^9.5" }
+        }"#;
+        let pkgs = parse_composer_json(text).unwrap();
+        assert_eq!(pkgs.len(), 2, "platform requirements skipped");
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "monolog/monolog").unwrap().version.as_deref(),
+            Some("2.8.0")
+        );
+        assert!(pkgs.iter().find(|p| p.name == "phpunit/phpunit").unwrap().version.is_none());
+    }
+
+    #[test]
+    fn cargo_manifest_caret_semantics() {
+        let text = r#"
+[dependencies]
+serde = "1.0.200"
+exact = "=2.1.0"
+renamed = { package = "real-name", version = "=3.0.0" }
+local = { path = "../local" }
+inherited = { workspace = true }
+
+[dev-dependencies]
+proptest = "1"
+"#;
+        let pkgs = parse_cargo_manifest(text).unwrap();
+        assert_eq!(pkgs.len(), 4, "path/workspace deps skipped");
+        // Bare versions are caret ranges in cargo — unpinned.
+        assert!(pkgs.iter().find(|p| p.name == "serde").unwrap().version.is_none());
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "exact").unwrap().version.as_deref(),
+            Some("2.1.0")
+        );
+        assert_eq!(
+            pkgs.iter().find(|p| p.name == "real-name").unwrap().version.as_deref(),
+            Some("3.0.0")
+        );
+    }
+
+    #[test]
+    fn shadowing_map_is_complete() {
+        for manifest in ["package.json", "pyproject.toml", "go.mod", "Gemfile", "composer.json", "Cargo.toml"] {
+            assert!(is_manifest(manifest));
+            assert!(!shadowing_lockfiles(manifest).is_empty());
+            // Every shadow is itself a supported lockfile.
+            for lock in shadowing_lockfiles(manifest) {
+                assert!(SUPPORTED_FILES.contains(lock), "{lock} unsupported");
+                assert!(!is_manifest(lock), "{lock} must not be a manifest");
+            }
+        }
+        assert!(!is_manifest("requirements.txt"));
     }
 
     #[test]

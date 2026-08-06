@@ -108,8 +108,50 @@ pub fn resolve_inventory(root: &Path, excludes: &PathFilter) -> Vec<ResolvedPack
     by_purl.into_values().collect()
 }
 
-/// Find lockfiles under `root`, bounded and skipping heavy vendor dirs and
-/// configured excludes (`[scan] exclude` plus `[scan.sca] exclude`, ADR 0004).
+/// The parent directory of a root-relative POSIX path (`""` at the root).
+fn rel_parent(rel: &str) -> &str {
+    rel.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("")
+}
+
+/// Sort discoveries and drop shadowed manifests: a manifest is a fallback,
+/// so if one of its lockfiles exists in the same directory or an ancestor
+/// (workspace roots hold the lock for member manifests — Cargo, Go), the
+/// lockfile's exact resolutions win and the manifest is skipped. A repo is
+/// never double-reported.
+fn finish_discovery(
+    mut found: Vec<(PathBuf, String, String)>,
+) -> Vec<(PathBuf, String, String)> {
+    let locks: std::collections::BTreeSet<(String, String)> = found
+        .iter()
+        .filter(|(_, _, name)| !lockfile::is_manifest(name))
+        .map(|(_, rel, name)| (rel_parent(rel).to_string(), name.clone()))
+        .collect();
+    found.retain(|(_, rel, name)| {
+        if !lockfile::is_manifest(name) {
+            return true;
+        }
+        let shadows = lockfile::shadowing_lockfiles(name);
+        let mut dir = rel_parent(rel);
+        loop {
+            if shadows
+                .iter()
+                .any(|lock| locks.contains(&(dir.to_string(), (*lock).to_string())))
+            {
+                return false;
+            }
+            if dir.is_empty() {
+                return true;
+            }
+            dir = rel_parent(dir);
+        }
+    });
+    found.sort_by(|a, b| a.1.cmp(&b.1));
+    found
+}
+
+/// Find lockfiles and unshadowed manifests under `root`, bounded and skipping
+/// heavy vendor dirs and configured excludes (`[scan] exclude` plus
+/// `[scan.sca] exclude`, ADR 0004).
 /// Returns (absolute path, root-relative POSIX path, file name), sorted.
 fn find_lockfiles(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, String)> {
     let mut found = Vec::new();
@@ -122,8 +164,7 @@ fn find_lockfiles(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, S
         for entry in entries.flatten() {
             visited += 1;
             if visited > MAX_FILES_VISITED {
-                found.sort_by(|a: &(PathBuf, String, String), b| a.1.cmp(&b.1));
-                return found;
+                return finish_discovery(found);
             }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
@@ -145,8 +186,7 @@ fn find_lockfiles(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, S
             }
         }
     }
-    found.sort_by(|a, b| a.1.cmp(&b.1));
-    found
+    finish_discovery(found)
 }
 
 /// OSV advisories indexed by lowercased package name, per ecosystem.
