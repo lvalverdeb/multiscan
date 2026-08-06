@@ -86,9 +86,11 @@ By default MultiScan auto-detects applicable layers. To force a subset:
 multiscan scan . --layers sca,secrets,iac
 ```
 
-Local layers: **`sca`** (dependency/lockfile & OS-package vulnerabilities),
-**`secrets`** (hardcoded credentials), **`iac`** (Terraform/YAML/JSON
-misconfiguration), **`sast`** (structural scaffold only in v1 — no rules).
+Local layers: **`sca`** (dependency vulnerabilities across Rust, JavaScript,
+Python, Go, Ruby, PHP, and Java — lockfiles, manifests, and OS packages),
+**`secrets`** (hardcoded credentials; optionally git history), **`iac`**
+(Terraform, Kubernetes, and Dockerfile misconfiguration), **`sast`**
+(structural scaffold only in v1 — no rules).
 `probe` is a web-only layer (see §11).
 
 ### Pick a depth profile
@@ -228,7 +230,14 @@ Precedence is **flag > config file > default**.
 [scan]
 layers  = ["sca", "secrets", "iac"]
 profile = "standard"
-exclude = ["vendor/**", "**/testdata/**", "*.min.js"]
+exclude = ["vendor/**", "**/testdata/**", "*.min.js"]   # globs, all layers
+
+# Per-layer overrides extend the global exclude for that layer's engines only.
+[scan.secrets]
+exclude         = ["fixtures/**"]  # skip these files in the secrets layer
+entropy_exclude = ["*.snap"]       # silence only the entropy heuristic here
+history         = false            # opt-in: also scan committed-then-removed
+                                   # secrets in git history (needs the git CLI)
 
 [gate]
 fail_on          = 80.0
@@ -369,10 +378,12 @@ multiscan scan web <url> --authorization ...  # authorized web target
 --layers sca,secrets,iac,sast     --profile quick|standard|thorough
 --format table|json|jsonl|sarif|sbom|markdown
 --fail-on <score|severity>        --baseline <file>     --min-severity <sev>
+--exclude <glob> (repeatable)     --history (secrets: also scan git history)
 --offline  --max-feed-age 7d      --no-store  --jobs N  --quiet  --verbose
 
 # understand & manage
-multiscan explain <id> [--history]
+multiscan explain <id> [--history]   # NB: here --history is the finding's
+                                     # audit trail, not the scan-time git scan
 multiscan report --format <fmt>
 multiscan diff <baseline>
 multiscan suppress add|list|expire ...

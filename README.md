@@ -30,9 +30,9 @@ MultiScan writes fast Rust executors but does not author vulnerability knowledge
 
 | Engine | What it does |
 |---|---|
-| `sca` | Lockfiles and OS packages → purl → OSV advisory matching, with per-ecosystem version semantics (semver, PEP 440, Maven, …) |
-| `secrets` | Regex + entropy + fingerprint detection. Secret *values* are never persisted or printed — type, location, and truncated fingerprint only |
-| `iac` | HCL / YAML / JSON infrastructure config → policy evaluation |
+| `sca` | Lockfiles, manifests, and OS packages → purl → OSV advisory matching, with per-ecosystem version semantics (semver, PEP 440, Maven, RubyGems, Composer, …). Covers Rust, JavaScript (npm/yarn/pnpm), Python (pip/uv/poetry), Go, Ruby, PHP, and Java (Maven/Gradle); a manifest is parsed only when no lockfile shadows it |
+| `secrets` | Provider rules (a versioned pack) + entropy + fingerprints. Built-in noise handling keeps lockfiles/IDE/minified files quiet by default; optional `--history` also scans git-history blobs. Secret *values* are never persisted or printed — type, location, and truncated fingerprint only |
+| `iac` | Terraform HCL / Kubernetes YAML-JSON / Dockerfile → data-driven policy evaluation (CIS-mapped) |
 | `probe` | Declarative HTTP templates against **authorized** web targets (limited DAST). Templates are data — no scripting, no code execution |
 | `sast` | Scaffold only in v1 (structural hashing; no rules yet) |
 | `bridge` | Importers for external scanner output (Trivy, Semgrep, Checkov, ZAP, generic SARIF) with cross-engine dedup |
@@ -89,7 +89,13 @@ Machine formats (`json`, `jsonl`, `sarif`, `sbom`) go to stdout with nothing int
 [scan]
 layers = ["sca", "secrets", "iac"]
 profile = "standard"            # quick | standard | thorough
-exclude = ["vendor/**", "**/testdata/**"]
+exclude = ["vendor/**", "**/testdata/**"]   # globs, all layers
+
+# Per-layer overrides extend the global exclude for one layer only.
+[scan.secrets]
+exclude        = ["fixtures/**"]   # skip these files in the secrets layer
+entropy_exclude = ["*.snap"]       # silence only the entropy heuristic here
+history        = false             # opt-in: also scan git-history blobs
 
 [gate]
 fail_on = 80.0

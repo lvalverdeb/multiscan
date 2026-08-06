@@ -1,20 +1,104 @@
 # Bundled probe templates (spec 7.4). Declarative data only: request + matcher
-# specs, no scripting (PRB-001). All requests are idempotent and body-less, so
-# they cannot write/delete/persist state on the target (PRB-004).
+# specs, no scripting (PRB-001). Every request is GET/HEAD, idempotent and
+# body-less, so it cannot write/delete/persist state on the target (PRB-004).
+#
+# Templates are tuned for low false positives: each requires a 200 status AND
+# distinctive content, never status alone. Grouped by class; secret/credential
+# exposures are `high`, information disclosure is `medium`.
+
+# ---- Secrets & credentials exposed over HTTP (high) ----
+
 - id: exposed-env-file
   severity: high
   cwe: [CWE-200]
   description: Environment file with secrets exposed over HTTP
   requests:
     - method: GET
-      path: ["/.env", "/.env.local", "/.env.production"]
+      path: ["/.env", "/.env.local", "/.env.production", "/.env.dev"]
       matchers:
         - type: status
           values: [200]
         - type: regex
           part: body
-          patterns: ["(?m)^[A-Z_]+_(KEY|SECRET|TOKEN|PASSWORD)="]
+          patterns: ["(?m)^[A-Z0-9_]+_(KEY|SECRET|TOKEN|PASSWORD)="]
       matchers_condition: and
+
+- id: exposed-npmrc
+  severity: high
+  cwe: [CWE-522]
+  description: npm configuration exposing an auth token
+  requests:
+    - method: GET
+      path: ["/.npmrc"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["_authToken", "_password=", ":_auth="]
+      matchers_condition: and
+
+- id: exposed-aws-credentials
+  severity: high
+  cwe: [CWE-522]
+  description: AWS credentials file exposed over HTTP
+  requests:
+    - method: GET
+      path: ["/.aws/credentials"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: regex
+          part: body
+          patterns: ["(?i)aws_(access_key_id|secret_access_key)\\s*="]
+      matchers_condition: and
+
+- id: exposed-ssh-private-key
+  severity: high
+  cwe: [CWE-312]
+  description: SSH private key exposed over HTTP
+  requests:
+    - method: GET
+      path: ["/.ssh/id_rsa", "/id_rsa", "/.ssh/id_ed25519"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["PRIVATE KEY-----"]
+      matchers_condition: and
+
+- id: exposed-wp-config-backup
+  severity: high
+  cwe: [CWE-530]
+  description: WordPress configuration backup exposing database credentials
+  requests:
+    - method: GET
+      path: ["/wp-config.php.bak", "/wp-config.php~", "/wp-config.php.save", "/wp-config.php.old"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["DB_PASSWORD", "DB_USER"]
+      matchers_condition: and
+
+- id: exposed-sql-dump
+  severity: high
+  cwe: [CWE-200]
+  description: SQL database dump exposed over HTTP
+  requests:
+    - method: GET
+      path: ["/dump.sql", "/database.sql", "/backup.sql", "/db.sql"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: regex
+          part: body
+          patterns: ["(?i)(INSERT INTO|CREATE TABLE|DROP TABLE IF EXISTS)"]
+      matchers_condition: and
+
+# ---- Exposed version-control metadata (medium) ----
 
 - id: exposed-git-config
   severity: medium
@@ -31,17 +115,109 @@
           words: ["[core]", "repositoryformatversion"]
       matchers_condition: and
 
+- id: exposed-git-head
+  severity: medium
+  cwe: [CWE-538]
+  description: Exposed .git/HEAD reveals a git repository
+  requests:
+    - method: GET
+      path: ["/.git/HEAD"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: regex
+          part: body
+          patterns: ["^ref:\\s+refs/"]
+      matchers_condition: and
+
+- id: exposed-svn
+  severity: medium
+  cwe: [CWE-538]
+  description: Exposed Subversion working copy metadata
+  requests:
+    - method: GET
+      path: ["/.svn/wc.db", "/.svn/entries"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["SQLite format 3", "svn:"]
+      matchers_condition: and
+
+- id: exposed-ds-store
+  severity: medium
+  cwe: [CWE-538]
+  description: Exposed .DS_Store reveals directory contents
+  requests:
+    - method: GET
+      path: ["/.DS_Store"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["Bud1"]
+      matchers_condition: and
+
+# ---- Debug & status endpoints ----
+
 - id: phpinfo-exposed
   severity: medium
   cwe: [CWE-200]
   description: phpinfo() page exposed
   requests:
     - method: GET
-      path: ["/phpinfo.php", "/info.php"]
+      path: ["/phpinfo.php", "/info.php", "/php_info.php"]
       matchers:
         - type: status
           values: [200]
         - type: word
           part: body
           words: ["PHP Version", "phpinfo()"]
+      matchers_condition: and
+
+- id: apache-server-status
+  severity: medium
+  cwe: [CWE-200]
+  description: Apache mod_status server-status page exposed
+  requests:
+    - method: GET
+      path: ["/server-status"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["Apache Server Status"]
+      matchers_condition: and
+
+- id: nginx-status
+  severity: medium
+  cwe: [CWE-200]
+  description: nginx stub_status page exposed
+  requests:
+    - method: GET
+      path: ["/nginx_status", "/nginx-status"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["Active connections:"]
+      matchers_condition: and
+
+- id: spring-actuator-env
+  severity: high
+  cwe: [CWE-200]
+  description: Spring Boot Actuator env endpoint exposing configuration
+  requests:
+    - method: GET
+      path: ["/actuator/env", "/env"]
+      matchers:
+        - type: status
+          values: [200]
+        - type: word
+          part: body
+          words: ["propertySources"]
       matchers_condition: and
