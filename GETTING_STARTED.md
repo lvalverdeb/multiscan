@@ -237,6 +237,9 @@ Precedence is **flag > config file > default**.
 layers  = ["sca", "secrets", "iac"]
 profile = "standard"
 exclude = ["vendor/**", "**/testdata/**", "*.min.js"]   # globs, all layers
+respect_gitignore = false           # opt-in: also honor the repo .gitignore.
+                                    # OFF by default so a secrets scan never
+                                    # skips a gitignored .env (ADR 0009).
 
 # Per-layer overrides extend the global exclude for that layer's engines only.
 [scan.secrets]
@@ -274,6 +277,14 @@ expires       = "2026-11-01"
 
 A malformed config fails fast with exit `2` — a `[[suppress]]` entry missing a
 mandatory field, carrying no selector at all, or using a bad `path` glob.
+
+### Ignore files
+
+Drop a **`.multiscanignore`** (gitignore syntax) at the scan root to skip paths
+with no `multiscan.toml` at all — e.g. `logs/`, `build/`, `*.min.js`. It is
+always honored. The repo's **`.gitignore`** is honored only with
+`respect_gitignore = true`: off by default, because a secrets scan must not
+silently skip a gitignored `.env` or `credentials.json` (ADR 0009).
 
 ---
 

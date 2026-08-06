@@ -107,10 +107,11 @@ fn find_files(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String)> {
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            if excludes.is_excluded(Layer::Secrets, &rel) {
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if excludes.is_excluded(Layer::Secrets, &rel) || excludes.is_ignored(&rel, is_dir) {
                 continue; // matched dirs prune the walk, matched files skip
             }
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if is_dir {
                 if matches!(name.as_str(), ".git" | "node_modules" | "target" | ".venv") {
                     continue;
                 }

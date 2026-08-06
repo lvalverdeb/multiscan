@@ -9,6 +9,7 @@
 //! (R-4); the spec 6.1 `&'static str` spelling is realised as owned fields
 //! constructed once per engine instance.
 
+mod ignorefile;
 mod pathfilter;
 mod registry;
 pub mod testkit;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 pub use multiscan_core::{EngineManifest, Layer, Profile, RawFinding};
+pub use ignorefile::IgnoreSet;
 pub use pathfilter::{PathFilter, PathFilterError};
 pub use registry::{EngineRun, Registry};
 

@@ -35,6 +35,10 @@ pub struct PathFilter {
     global: GlobSet,
     per_layer: BTreeMap<Layer, GlobSet>,
     secrets_entropy: GlobSet,
+    /// Ignore-file rules (`.multiscanignore`, optionally `.gitignore`), applied
+    /// to every layer during file discovery (ADR 0009). Convenience filtering,
+    /// not a security boundary.
+    ignore: crate::ignorefile::IgnoreSet,
 }
 
 fn compile(patterns: &[String], section: &str) -> Result<GlobSet, PathFilterError> {
@@ -66,6 +70,7 @@ impl PathFilter {
             global: GlobSet::empty(),
             per_layer: BTreeMap::new(),
             secrets_entropy: GlobSet::empty(),
+            ignore: crate::ignorefile::IgnoreSet::default(),
         }
     }
 
@@ -103,7 +108,24 @@ impl PathFilter {
             global,
             per_layer,
             secrets_entropy,
+            ignore: crate::ignorefile::IgnoreSet::default(),
         })
+    }
+
+    /// Attach compiled ignore-file rules (`.multiscanignore`, optionally
+    /// `.gitignore` — ADR 0009). The CLI loads the files (it owns filesystem
+    /// access); this keeps the rules on the same `PathFilter` the engines
+    /// already consult, so ignore matching rides the existing walk.
+    pub fn with_ignore(mut self, ignore: crate::ignorefile::IgnoreSet) -> Self {
+        self.ignore = ignore;
+        self
+    }
+
+    /// Whether `rel_path` (root-relative POSIX; `is_dir` flags directories) is
+    /// ignored by an ignore file. Applies to every layer. Convenience
+    /// filtering, not a security boundary (ADR 0009).
+    pub fn is_ignored(&self, rel_path: &str, is_dir: bool) -> bool {
+        self.ignore.is_ignored(rel_path, is_dir)
     }
 
     /// Whether the configured `[scan.secrets] entropy_exclude` globs silence

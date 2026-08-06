@@ -45,6 +45,7 @@
         "layers": { "description": "Layers to run; default auto-detect.", "type": "array", "items": { "$ref": "#/definitions/Layer" } },
         "profile": { "description": "Scan profile; default standard.", "$ref": "#/definitions/Profile" },
         "exclude": { "description": "Glob patterns to exclude, all layers. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it. Committable, machine-independent (CLI-007).", "type": "array", "items": { "type": "string" } },
+        "respect_gitignore": { "description": "Also honor the repository's .gitignore during discovery (ADR 0009). Off by default: a secrets scan must not skip a gitignored file (e.g. .env) unless the user opts in. `.multiscanignore` is always honored regardless.", "type": "boolean" },
         "sca": { "description": "SCA-layer overrides ([scan.sca]).", "$ref": "#/definitions/LayerScanConfig" },
         "secrets": { "description": "Secrets-layer overrides ([scan.secrets]).", "$ref": "#/definitions/SecretsScanConfig" },
         "iac": { "description": "IaC-layer overrides ([scan.iac]).", "$ref": "#/definitions/LayerScanConfig" }

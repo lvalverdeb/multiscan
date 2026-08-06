@@ -29,6 +29,25 @@ fn usage(message: &str) -> Exit {
     Exit::Usage
 }
 
+/// Load ignore-file rules from the scan root (ADR 0009): always
+/// `.multiscanignore`, plus `.gitignore` when `respect_gitignore`. Both are
+/// read from the root only; a missing file contributes nothing. The
+/// `.multiscanignore` rules come last so they can re-include (`!`) something
+/// `.gitignore` excluded.
+fn load_ignore_files(root: &std::path::Path, respect_gitignore: bool) -> multiscan_engine::IgnoreSet {
+    let mut text = String::new();
+    if respect_gitignore {
+        if let Ok(gitignore) = std::fs::read_to_string(root.join(".gitignore")) {
+            text.push_str(&gitignore);
+            text.push('\n');
+        }
+    }
+    if let Ok(msi) = std::fs::read_to_string(root.join(".multiscanignore")) {
+        text.push_str(&msi);
+    }
+    multiscan_engine::IgnoreSet::parse(&text)
+}
+
 /// Finding ids suppressed by the store at `now` (`multiscan suppress add`),
 /// filtered by expiry (FR-014). Config `[[suppress]]` entries are handled
 /// separately by [`crate::suppress`] since they carry scoped selectors and
@@ -561,6 +580,15 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         Ok(filter) => filter,
         Err(err) => return Ok(usage(&err.to_string())),
     };
+    // Ignore files (ADR 0009): `.multiscanignore` is always honored;
+    // `.gitignore` only when [scan] respect_gitignore is set — a secrets scan
+    // must not skip a gitignored file (e.g. `.env`) by default.
+    let respect_gitignore = config
+        .scan
+        .as_ref()
+        .and_then(|s| s.respect_gitignore)
+        .unwrap_or(false);
+    let excludes = excludes.with_ignore(load_ignore_files(&args.path, respect_gitignore));
     // Compile + validate config `[[suppress]]` entries now: an entry with no
     // selector or a bad path glob is a config error (exit 2), reported before
     // any scanning work (ADR 0008).
