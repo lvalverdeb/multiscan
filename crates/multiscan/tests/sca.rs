@@ -151,3 +151,66 @@ fn no_lockfile_no_findings() {
     assert_eq!(out.status.code(), Some(0));
     assert!(findings.as_array().unwrap().is_empty());
 }
+
+/// FR-002/FR-003 for uv.lock: a pinned PyPI package below the fix resolves
+/// against an ECOSYSTEM-range advisory with PEP 440 ordering, and the
+/// workspace-local (virtual/editable) entries produce nothing.
+#[test]
+fn uv_lock_resolves_pypi_advisory_offline() {
+    let cache = tempfile::tempdir().unwrap();
+    // Seed a PyPI advisory alongside the npm one: Django < 3.2.15.
+    let mut osv = BTreeMap::new();
+    osv.insert(
+        "npm".to_string(),
+        format!("{LODASH_ADVISORY}\n").into_bytes(),
+    );
+    let django = r#"{"id":"PYSEC-2022-1","summary":"SQL injection in Django","aliases":["CVE-2022-34265"],"database_specific":{"severity":"HIGH","cwe_ids":["CWE-89"]},"affected":[{"package":{"ecosystem":"PyPI","name":"Django"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"3.2"},{"fixed":"3.2.15"}]}]}]}"#;
+    osv.insert("PyPI".to_string(), format!("{django}\n").into_bytes());
+    let mut osv_counts = BTreeMap::new();
+    osv_counts.insert("npm".to_string(), 1u64);
+    osv_counts.insert("PyPI".to_string(), 1u64);
+    let data = SnapshotData {
+        kev_json: br#"{"vulnerabilities":[]}"#.to_vec(),
+        epss_csv: b"cve,epss,percentile\n".to_vec(),
+        osv_jsonl: osv,
+        counts: SnapshotCounts {
+            kev: 0,
+            epss: 0,
+            osv: osv_counts,
+        },
+        sources: BTreeMap::new(),
+    };
+    write_snapshot(cache.path(), &data, Utc::now()).unwrap();
+
+    let project = tempfile::tempdir().unwrap();
+    // uv normalizes names (django, not Django); PyPI matching re-normalizes.
+    std::fs::write(
+        project.path().join("uv.lock"),
+        r#"
+version = 1
+
+[[package]]
+name = "django"
+version = "3.2.14"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "my-app"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "django" },
+]
+"#,
+    )
+    .unwrap();
+
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    let findings = findings.as_array().unwrap();
+    assert_eq!(findings.len(), 1, "expected the Django advisory: {findings:?}");
+    let f = &findings[0];
+    assert_eq!(f["identity"]["advisory_id"], "PYSEC-2022-1");
+    assert_eq!(f["remediation"]["fixed_version"], "3.2.15");
+    assert_eq!(f["asset"]["identifier"], "pkg:pypi/django@3.2.14");
+}

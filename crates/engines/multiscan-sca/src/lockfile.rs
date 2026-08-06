@@ -38,12 +38,18 @@ pub fn parser_for(file_name: &str) -> Option<ParseFn> {
         "Cargo.lock" => Some(parse_cargo_lock),
         "package-lock.json" => Some(parse_package_lock),
         "requirements.txt" => Some(parse_requirements_txt),
+        "uv.lock" => Some(parse_uv_lock),
         _ => None,
     }
 }
 
 /// File names this engine recognizes, for cheap applicability checks.
-pub const SUPPORTED_FILES: &[&str] = &["Cargo.lock", "package-lock.json", "requirements.txt"];
+pub const SUPPORTED_FILES: &[&str] = &[
+    "Cargo.lock",
+    "package-lock.json",
+    "requirements.txt",
+    "uv.lock",
+];
 
 // ---- Cargo.lock ----
 
@@ -138,6 +144,83 @@ fn parse_package_lock(text: &str) -> Result<Vec<ResolvedPackage>, String> {
     Ok(out)
 }
 
+// ---- uv.lock (uv's TOML workspace lockfile; [[package]] entries) ----
+
+#[derive(Deserialize)]
+struct UvLock {
+    #[serde(default)]
+    package: Vec<UvPackage>,
+}
+
+#[derive(Deserialize)]
+struct UvPackage {
+    name: String,
+    #[serde(default)]
+    version: Option<String>,
+    /// Source table, e.g. `{ registry = "..." }`, `{ virtual = "." }`,
+    /// `{ editable = "../member" }`, `{ git = "..." }`. Kept as a raw map so
+    /// unknown future source kinds parse instead of failing the file.
+    #[serde(default)]
+    source: Option<std::collections::BTreeMap<String, toml::Value>>,
+    #[serde(default)]
+    dependencies: Vec<UvDependency>,
+    #[serde(default, rename = "dev-dependencies")]
+    dev_dependencies: std::collections::BTreeMap<String, Vec<UvDependency>>,
+    #[serde(default, rename = "optional-dependencies")]
+    optional_dependencies: std::collections::BTreeMap<String, Vec<UvDependency>>,
+}
+
+/// One entry of a `dependencies` array: `{ name = "idna", marker = "..." }`.
+#[derive(Deserialize)]
+struct UvDependency {
+    name: String,
+}
+
+/// Workspace-local packages (`virtual`, `editable`, `directory`, `path`
+/// sources) are the user's own code: they are not PyPI packages, and
+/// resolving their names against PyPI advisories would invite name-collision
+/// false positives. They are skipped from the inventory but their dependency
+/// lists define what counts as a direct dependency.
+fn uv_source_is_local(source: &Option<std::collections::BTreeMap<String, toml::Value>>) -> bool {
+    source.as_ref().is_some_and(|s| {
+        ["virtual", "editable", "directory", "path"]
+            .iter()
+            .any(|key| s.contains_key(*key))
+    })
+}
+
+fn parse_uv_lock(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let lock: UvLock = toml::from_str(text).map_err(|e| format!("uv.lock: {e}"))?;
+
+    // Direct = declared by any workspace-local package, in its runtime,
+    // dev-group, or extras lists (best-effort; drives evidence only).
+    let mut direct_names = std::collections::BTreeSet::new();
+    for package in lock.package.iter().filter(|p| uv_source_is_local(&p.source)) {
+        let groups = package
+            .dev_dependencies
+            .values()
+            .chain(package.optional_dependencies.values());
+        for dep in package.dependencies.iter().chain(groups.flatten()) {
+            direct_names.insert(dep.name.clone());
+        }
+    }
+
+    Ok(lock
+        .package
+        .into_iter()
+        .filter(|p| !uv_source_is_local(&p.source))
+        .map(|p| ResolvedPackage {
+            ecosystem: "PyPI".to_string(),
+            purl_type: "pypi".to_string(),
+            direct: direct_names.contains(&p.name),
+            // uv pins every resolved package; a missing version degrades to
+            // an unpinned declaration (SCA-001) rather than being dropped.
+            version: p.version,
+            name: p.name,
+        })
+        .collect())
+}
+
 // ---- requirements.txt (pinned lines only; SCA-001 for the rest) ----
 
 fn parse_requirements_txt(text: &str) -> Result<Vec<ResolvedPackage>, String> {
@@ -218,6 +301,75 @@ version = "1.0.200"
         let direct = pkgs.iter().find(|p| p.direct).unwrap();
         assert_eq!(direct.version.as_deref(), Some("4.17.20"));
         assert!(pkgs.iter().any(|p| !p.direct));
+    }
+
+    #[test]
+    fn uv_lock_parses_registry_packages_and_skips_local() {
+        let text = r#"
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[manifest]
+members = ["my-app", "my-lib"]
+
+[[package]]
+name = "requests"
+version = "2.31.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "urllib3" },
+]
+sdist = { url = "https://example.invalid/requests.tar.gz", hash = "sha256:aa", size = 1 }
+
+[[package]]
+name = "urllib3"
+version = "1.26.5"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "my-app"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "requests" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "black" },
+]
+
+[[package]]
+name = "my-lib"
+version = "0.1.0"
+source = { editable = "../my-lib" }
+
+[[package]]
+name = "black"
+version = "24.4.2"
+source = { registry = "https://pypi.org/simple" }
+"#;
+        let pkgs = parse_uv_lock(text).unwrap();
+        // Local packages (virtual root, editable member) are not inventoried.
+        assert_eq!(pkgs.len(), 3);
+        assert!(!pkgs.iter().any(|p| p.name == "my-app" || p.name == "my-lib"));
+
+        let requests = pkgs.iter().find(|p| p.name == "requests").unwrap();
+        assert_eq!(requests.purl(), "pkg:pypi/requests@2.31.0");
+        assert_eq!(requests.ecosystem, "PyPI");
+        assert!(requests.direct, "declared by the virtual root");
+
+        // Dev-group deps of a local package are direct too.
+        assert!(pkgs.iter().find(|p| p.name == "black").unwrap().direct);
+        // Transitive: only reachable via requests.
+        assert!(!pkgs.iter().find(|p| p.name == "urllib3").unwrap().direct);
+    }
+
+    #[test]
+    fn uv_lock_malformed_degrades_with_reason() {
+        let err = parse_uv_lock("version = [not toml").unwrap_err();
+        assert!(err.starts_with("uv.lock:"));
     }
 
     #[test]
