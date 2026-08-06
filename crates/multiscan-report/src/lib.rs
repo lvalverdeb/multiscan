@@ -108,6 +108,102 @@ fn location_of(finding: &Finding) -> String {
     }
 }
 
+/// When more than this many findings share one rule and one file, the human
+/// renderers (table, markdown) collapse them into a single counted row so a
+/// flood cannot bury unrelated findings. Machine formats are never collapsed —
+/// they keep every per-instance finding so baselines and tooling still see
+/// each fingerprint (item 6, render-time only).
+const FLOOD_THRESHOLD: usize = 10;
+
+/// How many sample line numbers a collapsed row lists.
+const FLOOD_SAMPLES: usize = 3;
+
+/// A human-render row: either one finding, or a collapsed flood of findings
+/// sharing (rule_id, path, severity).
+enum DisplayRow<'a> {
+    /// A single finding rendered normally.
+    One(&'a Finding),
+    /// `count` findings of one rule in one file, with a representative (the
+    /// highest-ranked member) and a few sample line numbers.
+    Flood {
+        /// Highest-ranked member — supplies id/score/class/rule/fix columns.
+        rep: &'a Finding,
+        /// Total findings collapsed here.
+        count: usize,
+        /// Up to [`FLOOD_SAMPLES`] line numbers, for orientation.
+        sample_lines: Vec<i64>,
+    },
+}
+
+impl DisplayRow<'_> {
+    fn severity(&self) -> Severity {
+        match self {
+            DisplayRow::One(f) | DisplayRow::Flood { rep: f, .. } => f.severity,
+        }
+    }
+}
+
+/// Collapse per-instance findings into display rows, folding any group larger
+/// than [`FLOOD_THRESHOLD`] that shares one rule, one file, and one severity
+/// into a single counted row. Input is assumed already sorted (CLI-003); the
+/// output preserves that order, a flood taking the position of its first
+/// (highest-ranked) member. Deterministic — no clock, no hashing.
+fn collapse_floods(findings: &[Finding]) -> Vec<DisplayRow<'_>> {
+    // Group indices by (rule_id, path, severity), keeping sorted order.
+    let mut groups: std::collections::BTreeMap<(String, String, Severity), Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (i, f) in findings.iter().enumerate() {
+        groups
+            .entry((rule_id(f), f.location.path.clone(), f.severity))
+            .or_default()
+            .push(i);
+    }
+    // The index of the first member of each flood group → where it renders.
+    let mut flood_head: std::collections::BTreeMap<usize, (usize, Vec<i64>)> =
+        std::collections::BTreeMap::new();
+    let mut floody: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    for members in groups.values() {
+        if members.len() > FLOOD_THRESHOLD {
+            let head = members[0];
+            let mut samples: Vec<i64> = members
+                .iter()
+                .filter_map(|&i| findings[i].location.line)
+                .collect();
+            // Ascending, lowest few — reads as line numbers, stays deterministic.
+            samples.sort_unstable();
+            samples.truncate(FLOOD_SAMPLES);
+            flood_head.insert(head, (members.len(), samples));
+            floody.extend(members.iter().copied());
+        }
+    }
+    let mut rows = Vec::new();
+    for (i, f) in findings.iter().enumerate() {
+        match flood_head.get(&i) {
+            Some((count, sample_lines)) => rows.push(DisplayRow::Flood {
+                rep: f,
+                count: *count,
+                sample_lines: sample_lines.clone(),
+            }),
+            // A non-head member of a flood is folded away.
+            None if floody.contains(&i) => {}
+            None => rows.push(DisplayRow::One(f)),
+        }
+    }
+    rows
+}
+
+/// The location cell for a collapsed flood: the shared file, its total count,
+/// and a few sample line numbers.
+fn flood_location(rep: &Finding, count: usize, sample_lines: &[i64]) -> String {
+    let path = &rep.location.path;
+    if sample_lines.is_empty() {
+        format!("{path} (×{count})")
+    } else {
+        let lines: Vec<String> = sample_lines.iter().map(|l| l.to_string()).collect();
+        format!("{path}:{{{}}}… (×{count})", lines.join(","))
+    }
+}
+
 fn severity_label(severity: Severity) -> &'static str {
     match severity {
         Severity::Informational => "INFO",
@@ -287,20 +383,31 @@ fn table(findings: &[Finding], footer: &Footer) -> String {
         Severity::Low,
         Severity::Informational,
     ];
+    let rows = collapse_floods(findings);
     for band in bands {
-        let in_band: Vec<&Finding> = findings.iter().filter(|f| f.severity == band).collect();
-        if in_band.is_empty() {
+        // The band header keeps the honest underlying finding count; the rows
+        // below may collapse floods (each shows its own ×N).
+        let band_count = findings.iter().filter(|f| f.severity == band).count();
+        if band_count == 0 {
             continue;
         }
-        out.push_str(&format!("{} ({})\n", severity_label(band), in_band.len()));
-        for f in in_band {
+        out.push_str(&format!("{} ({})\n", severity_label(band), band_count));
+        for row in rows.iter().filter(|r| r.severity() == band) {
+            let (f, location) = match row {
+                DisplayRow::One(f) => (*f, location_of(f)),
+                DisplayRow::Flood {
+                    rep,
+                    count,
+                    sample_lines,
+                } => (*rep, flood_location(rep, *count, sample_lines)),
+            };
             out.push_str(&format!(
                 "  {:<12}  {:>5.1}  {:<10}  {}  {}  {}\n",
                 id_prefix(f),
                 f.risk_score,
                 class_label(f),
                 rule_id(f),
-                location_of(f),
+                location,
                 fix_cell(f),
             ));
         }
@@ -319,7 +426,15 @@ fn markdown(findings: &[Finding], footer: &Footer) -> String {
     }
     out.push_str("| Severity | ID | Score | Class | Rule | Location | Fix |\n");
     out.push_str("|---|---|---|---|---|---|---|\n");
-    for f in findings {
+    for row in collapse_floods(findings) {
+        let (f, location) = match &row {
+            DisplayRow::One(f) => (*f, location_of(f)),
+            DisplayRow::Flood {
+                rep,
+                count,
+                sample_lines,
+            } => (*rep, flood_location(rep, *count, sample_lines)),
+        };
         out.push_str(&format!(
             "| {} | `{}` | {:.1} | {} | {} | `{}` | {} |\n",
             severity_label(f.severity),
@@ -327,7 +442,7 @@ fn markdown(findings: &[Finding], footer: &Footer) -> String {
             f.risk_score,
             class_label(f),
             rule_id(f),
-            location_of(f),
+            location,
             fix_cell(f),
         ));
     }
@@ -526,5 +641,104 @@ mod tests {
         let parsed: Vec<Finding> = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0], sample());
+    }
+
+    /// A secrets-style flood: `n` findings of one rule in one file.
+    fn flood(n: usize, rule: &str, path: &str) -> Vec<Finding> {
+        (0..n)
+            .map(|i| {
+                let mut f = sample();
+                f.finding_id = FindingId(format!("{i:064x}"));
+                f.identity = IdentityKey::ExposedSecret {
+                    rule_id: rule.into(),
+                    path: path.into(),
+                    fingerprint: format!("fp{i}"),
+                };
+                f.severity = Severity::Medium;
+                f.risk_score = 13.5;
+                f.location = Location {
+                    path: path.into(),
+                    line: Some(100 + i as i64),
+                };
+                f
+            })
+            .collect()
+    }
+
+    #[test]
+    fn human_formats_collapse_a_flood() {
+        let mut findings = flood(1550, "high-entropy-string", "uv.lock");
+        sort_findings(&mut findings);
+
+        let table = render(Format::Table, &findings, &footer());
+        // Exactly one collapsed row for the rule, carrying the total count.
+        assert_eq!(table.matches("high-entropy-string").count(), 1);
+        assert!(table.contains("(×1550)"), "table: {table}");
+        // Sample line numbers appear for orientation.
+        assert!(table.contains("uv.lock:{"), "table: {table}");
+        // The honest total is still reported at the bottom and in the band.
+        assert!(table.contains("1550 finding(s)"));
+        assert!(table.contains("MEDIUM (1550)"));
+
+        let md = render(Format::Markdown, &findings, &footer());
+        assert_eq!(md.matches("high-entropy-string").count(), 1);
+        assert!(md.contains("(×1550)"));
+    }
+
+    #[test]
+    fn machine_formats_keep_every_instance() {
+        let mut findings = flood(1550, "high-entropy-string", "uv.lock");
+        sort_findings(&mut findings);
+
+        // json/jsonl keep all 1550 per-instance findings (baseline diffing).
+        let json: Vec<Finding> =
+            serde_json::from_str(&render(Format::Json, &findings, &footer())).unwrap();
+        assert_eq!(json.len(), 1550);
+        let jsonl = render(Format::Jsonl, &findings, &footer());
+        assert_eq!(jsonl.lines().count(), 1550);
+    }
+
+    #[test]
+    fn small_groups_are_not_collapsed() {
+        // At or below the threshold, every finding shows individually.
+        let mut findings = flood(FLOOD_THRESHOLD, "high-entropy-string", "uv.lock");
+        sort_findings(&mut findings);
+        let table = render(Format::Table, &findings, &footer());
+        assert!(!table.contains('×'), "must not collapse ≤ threshold: {table}");
+        assert_eq!(table.matches("high-entropy-string").count(), FLOOD_THRESHOLD);
+    }
+
+    #[test]
+    fn a_real_finding_is_not_buried_by_a_flood() {
+        // One high-severity secret alongside a medium flood: the real finding
+        // still renders as its own row.
+        let mut findings = flood(1550, "high-entropy-string", "uv.lock");
+        let mut real = sample();
+        real.finding_id = FindingId("f".repeat(64));
+        real.identity = IdentityKey::ExposedSecret {
+            rule_id: "aws-access-key-id".into(),
+            path: "config.py".into(),
+            fingerprint: "real".into(),
+        };
+        real.severity = Severity::High;
+        real.location = Location {
+            path: "config.py".into(),
+            line: Some(3),
+        };
+        findings.push(real);
+        sort_findings(&mut findings);
+
+        let table = render(Format::Table, &findings, &footer());
+        assert!(table.contains("aws-access-key-id"), "real finding hidden: {table}");
+        assert!(table.contains("config.py:3"));
+    }
+
+    #[test]
+    fn collapse_is_deterministic() {
+        let mut findings = flood(1550, "high-entropy-string", "uv.lock");
+        sort_findings(&mut findings);
+        let a = render(Format::Table, &findings, &footer());
+        let b = render(Format::Table, &findings, &footer());
+        assert_eq!(a, b);
     }
 }

@@ -116,6 +116,12 @@ multiscan scan . --format markdown  # paste into a PR/issue
 multiscan scan . --format table     # the default human view
 ```
 
+**Flood aggregation (human formats):** when more than ten findings share one
+rule and one file, the `table` and `markdown` views collapse them into a single
+counted row (`path:{lines}… (×N)`) so a real finding is never buried under a
+flood of near-duplicates. Machine formats (`json`/`jsonl`/`sarif`) always keep
+every per-instance finding, so baseline diffing and tooling see each fingerprint.
+
 **Output discipline (important for scripting):** machine output goes to
 **stdout, alone**. All progress, warnings, and diagnostics go to **stderr**. So
 this always yields clean JSON:
