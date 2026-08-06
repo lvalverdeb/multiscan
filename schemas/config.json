@@ -89,12 +89,14 @@
       }
     },
     "SuppressEntry": {
-      "description": "One [[suppress]] entry. justification, approver, and expires are all mandatory — permanent suppression does not exist (CLI-006).",
+      "description": "One [[suppress]] entry. justification, approver, and expires are all mandatory — permanent suppression does not exist (CLI-006). At least one selector (finding_id, rule_id, or path) must be present; when several are, they must all match (ADR 0008).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["finding_id", "justification", "approver", "expires"],
+      "required": ["justification", "approver", "expires"],
       "properties": {
-        "finding_id": { "description": "Finding to suppress (prefix allowed at CLI, full id here).", "$ref": "#/definitions/FindingId" },
+        "finding_id": { "description": "Exact Finding to suppress (full id). Selector.", "$ref": "#/definitions/FindingId" },
+        "rule_id": { "description": "Suppress Findings whose engine rule/policy/template id equals this (e.g. `high-entropy-string`). Selector; combine with `path` to scope it (ADR 0008).", "type": "string" },
+        "path": { "description": "Glob over the Finding's root-relative POSIX location path (e.g. `uv.lock`, `vendor/**`). Selector (ADR 0008).", "type": "string" },
         "justification": { "description": "Why this Finding is suppressed.", "type": "string" },
         "approver": { "description": "Who approved the suppression.", "type": "string" },
         "expires": { "description": "Expiry date, RFC 3339 date; after this the Finding gates normally (FR-014).", "type": "string" }

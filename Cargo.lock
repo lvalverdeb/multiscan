@@ -1219,6 +1219,7 @@ dependencies = [
  "clap_complete",
  "clap_mangen",
  "flate2",
+ "globset",
  "multiscan-bridge",
  "multiscan-core",
  "multiscan-dedup",

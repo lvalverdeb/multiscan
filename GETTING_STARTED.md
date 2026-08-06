@@ -252,15 +252,22 @@ data_classification = "sensitive"
 max_age = "7d"                      # warn/degrade if advisory data is older
 offline = false
 
-[[suppress]]                        # all three fields are mandatory
-finding_id    = "a3f9c1e0"
+[[suppress]]                        # justification/approver/expires are mandatory
+finding_id    = "a3f9c1e0"          # …plus ≥1 selector: finding_id, rule_id, or path
 justification = "Vendored test fixture, not shipped"
+approver      = "sec-team"
+expires       = "2026-11-01"
+
+[[suppress]]                        # scoped: rule_id + path are ANDed, so this
+rule_id       = "high-entropy-string"   # silences exactly this class in exactly
+path          = "uv.lock"           # this file — nothing else (ADR 0008)
+justification = "Package checksums, not secrets"
 approver      = "sec-team"
 expires       = "2026-11-01"
 ```
 
-A malformed config — including a `[[suppress]]` entry missing a required field —
-fails fast with exit `2`.
+A malformed config fails fast with exit `2` — a `[[suppress]]` entry missing a
+mandatory field, carrying no selector at all, or using a bad `path` glob.
 
 ---
 

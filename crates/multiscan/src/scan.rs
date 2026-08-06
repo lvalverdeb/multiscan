@@ -29,26 +29,16 @@ fn usage(message: &str) -> Exit {
     Exit::Usage
 }
 
-/// Finding ids that are actively suppressed at `now` — the union of config
-/// `[[suppress]]` entries and store suppressions, each filtered by expiry
-/// (FR-014). Config entries work even with `--no-store` since they live in the
-/// committed config.
-fn active_suppression_ids(
-    config: &multiscan_core::Config,
+/// Finding ids suppressed by the store at `now` (`multiscan suppress add`),
+/// filtered by expiry (FR-014). Config `[[suppress]]` entries are handled
+/// separately by [`crate::suppress`] since they carry scoped selectors and
+/// work even with `--no-store`.
+fn store_suppression_ids(
     root: &std::path::Path,
     no_store: bool,
     now: chrono::DateTime<chrono::Utc>,
 ) -> std::collections::BTreeSet<String> {
     let mut ids = std::collections::BTreeSet::new();
-
-    for entry in &config.suppress {
-        // `expires` is a date (or datetime); treat a bare date as end-of-day
-        // UTC so a suppression is active through its stated day.
-        if suppression_active(&entry.expires, now) {
-            ids.insert(entry.finding_id.0.clone());
-        }
-    }
-
     if !no_store {
         use multiscan_store::{SqliteStore, Store};
         let db_path = root.join(".multiscan/multiscan.db");
@@ -63,21 +53,6 @@ fn active_suppression_ids(
         }
     }
     ids
-}
-
-/// Whether an `expires` string (RFC 3339 datetime or bare `YYYY-MM-DD`) is
-/// still in the future relative to `now`.
-fn suppression_active(expires: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(expires) {
-        return dt.with_timezone(&chrono::Utc) > now;
-    }
-    if let Ok(date) = chrono::NaiveDate::parse_from_str(expires, "%Y-%m-%d") {
-        // Active through the end of the stated day.
-        if let Some(end) = date.and_hms_opt(23, 59, 59) {
-            return end.and_utc() > now;
-        }
-    }
-    false
 }
 
 /// Baseline finding ids from `--baseline` or `[gate].baseline` (FR-010). The
@@ -586,6 +561,13 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         Ok(filter) => filter,
         Err(err) => return Ok(usage(&err.to_string())),
     };
+    // Compile + validate config `[[suppress]]` entries now: an entry with no
+    // selector or a bad path glob is a config error (exit 2), reported before
+    // any scanning work (ADR 0008).
+    let config_suppressions = match crate::suppress::compile(&config.suppress) {
+        Ok(compiled) => compiled,
+        Err(err) => return Ok(usage(&err)),
+    };
     if args.verbose && !args.quiet {
         match &config_path {
             Some(p) => eprintln!("multiscan: config: {}", p.display()),
@@ -881,9 +863,13 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
     let now = chrono::DateTime::parse_from_rfc3339(&ctx.started_at)
         .map(|dt| dt.with_timezone(&chrono::Utc))
         .unwrap_or_else(|_| chrono::Utc::now());
-    let suppressed_ids = active_suppression_ids(&config, &args.path, args.no_store, now);
+    let store_ids = store_suppression_ids(&args.path, args.no_store, now);
     for finding in &mut findings {
-        if suppressed_ids.contains(&finding.finding_id.0) {
+        let suppressed = store_ids.contains(&finding.finding_id.0)
+            || config_suppressions
+                .iter()
+                .any(|s| s.active_match(finding, now));
+        if suppressed {
             finding.status = FindingStatus::Suppressed;
         }
     }

@@ -27,6 +27,7 @@ clap.workspace = true
 clap_complete.workspace = true
 clap_mangen.workspace = true
 chrono.workspace = true
+globset.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true

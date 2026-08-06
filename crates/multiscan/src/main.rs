@@ -7,6 +7,7 @@ mod db;
 mod exit;
 mod history;
 mod scan;
+mod suppress;
 
 use clap::{CommandFactory, Parser};
 

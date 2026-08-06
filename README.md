@@ -105,8 +105,11 @@ baseline = ".multiscan/baseline.json"
 max_age = "7d"
 
 [[suppress]]
-finding_id = "a3f9c1e0..."
-justification = "Vendored test fixture, not shipped"
+# ≥1 selector required (finding_id, rule_id, path); when several are given they
+# are ANDed. justification/approver/expires are mandatory (CLI-006).
+rule_id = "high-entropy-string"
+path = "uv.lock"
+justification = "Package checksums, not secrets"
 approver = "sec-team"
 expires = "2026-11-01"
 ```
