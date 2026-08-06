@@ -26,12 +26,15 @@ pub struct PathFilterError {
     pub reason: String,
 }
 
-/// Compiled exclude sets: one global (all layers) plus per-layer extensions.
+/// Compiled exclude sets: one global (all layers) plus per-layer extensions,
+/// and the secrets-layer entropy-noise set (ADR 0005) — configured globs
+/// where the entropy fallback is silenced while precise rules still run.
 /// `BTreeMap`, not `HashMap` — the filter sits on the scan path (DET-001).
 #[derive(Debug, Clone)]
 pub struct PathFilter {
     global: GlobSet,
     per_layer: BTreeMap<Layer, GlobSet>,
+    secrets_entropy: GlobSet,
 }
 
 fn compile(patterns: &[String], section: &str) -> Result<GlobSet, PathFilterError> {
@@ -62,6 +65,7 @@ impl PathFilter {
         Self {
             global: GlobSet::empty(),
             per_layer: BTreeMap::new(),
+            secrets_entropy: GlobSet::empty(),
         }
     }
 
@@ -74,18 +78,40 @@ impl PathFilter {
         };
         let global = compile(&scan.exclude, "scan")?;
         let mut per_layer = BTreeMap::new();
-        let sections: [(Layer, Option<&multiscan_core::LayerScanConfig>, &str); 3] = [
-            (Layer::Sca, scan.sca.as_ref(), "scan.sca"),
-            (Layer::Secrets, scan.secrets.as_ref(), "scan.secrets"),
-            (Layer::Iac, scan.iac.as_ref(), "scan.iac"),
+        let sections: [(Layer, Option<&[String]>, &str); 3] = [
+            (Layer::Sca, scan.sca.as_ref().map(|s| &s.exclude[..]), "scan.sca"),
+            (
+                Layer::Secrets,
+                scan.secrets.as_ref().map(|s| &s.exclude[..]),
+                "scan.secrets",
+            ),
+            (Layer::Iac, scan.iac.as_ref().map(|s| &s.exclude[..]), "scan.iac"),
         ];
-        for (layer, section, name) in sections {
-            let Some(section) = section else { continue };
-            if !section.exclude.is_empty() {
-                per_layer.insert(layer, compile(&section.exclude, name)?);
+        for (layer, exclude, name) in sections {
+            let Some(exclude) = exclude else { continue };
+            if !exclude.is_empty() {
+                per_layer.insert(layer, compile(exclude, name)?);
             }
         }
-        Ok(Self { global, per_layer })
+        let secrets_entropy = match scan.secrets.as_ref() {
+            Some(s) if !s.entropy_exclude.is_empty() => {
+                compile(&s.entropy_exclude, "scan.secrets.entropy_exclude")?
+            }
+            _ => GlobSet::empty(),
+        };
+        Ok(Self {
+            global,
+            per_layer,
+            secrets_entropy,
+        })
+    }
+
+    /// Whether the configured `[scan.secrets] entropy_exclude` globs silence
+    /// the entropy fallback for `rel_path` (ADR 0005). This extends — never
+    /// replaces — the secrets engine's built-in known-noise list; precise
+    /// provider rules are unaffected either way.
+    pub fn is_entropy_excluded(&self, rel_path: &str) -> bool {
+        self.secrets_entropy.is_match(rel_path)
     }
 
     /// Whether `rel_path` (root-relative, POSIX separators) is excluded for
@@ -166,6 +192,19 @@ mod tests {
         let err = PathFilter::from_config(&cfg).unwrap_err();
         assert_eq!(err.pattern, "a{b");
         assert_eq!(err.section, "scan.iac");
+    }
+
+    #[test]
+    fn entropy_exclude_is_separate_from_discovery_excludes() {
+        let cfg: Config = serde_json::from_value(serde_json::json!({
+            "scan": { "secrets": { "entropy_exclude": ["fixtures/**"] } }
+        }))
+        .unwrap();
+        let filter = PathFilter::from_config(&cfg).unwrap();
+        // Entropy-excluded, but still discovered/scanned by precise rules.
+        assert!(filter.is_entropy_excluded("fixtures/blob.txt"));
+        assert!(!filter.is_excluded(Layer::Secrets, "fixtures/blob.txt"));
+        assert!(!filter.is_entropy_excluded("src/main.rs"));
     }
 
     #[test]

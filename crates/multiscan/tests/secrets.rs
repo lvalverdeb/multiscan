@@ -109,3 +109,127 @@ fn clean_file_no_findings() {
     let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(findings.as_array().unwrap().is_empty());
 }
+
+/// ADR 0005: a lockfile's checksum noise never reaches the entropy fallback,
+/// but a real provider-shaped credential in the same file is still caught.
+#[test]
+fn lockfile_noise_suppressed_precise_rules_still_fire() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("uv.lock"),
+        format!(
+            r#"[[package]]
+name = "aiobotocore"
+version = "3.7.0"
+sdist = {{ url = "https://files.pythonhosted.org/packages/e7/75/42cce839c2ec263ff74b10b650fe36b066fbb124cbee6f247eac0983e1ab/aiobotocore-3.7.0.tar.gz", hash = "sha256:c64d871ed5491a6571948dd48eabd185b46c6c23b64e3afd0c059fc7593ada30" }}
+leaked = "{AWS_KEY_ID}"
+"#
+        ),
+    )
+    .unwrap();
+
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let arr = findings.as_array().unwrap();
+    assert!(
+        !arr.iter().any(|f| f["identity"]["rule_id"] == "high-entropy-string"),
+        "lockfile checksums must not fire the entropy fallback: {arr:?}"
+    );
+    assert!(
+        arr.iter().any(|f| f["identity"]["rule_id"] == "aws-access-key-id"),
+        "precise rules must still run on lockfiles: {arr:?}"
+    );
+}
+
+/// ADR 0005 token shapes: digests, UUIDs, and URL-embedded runs are exempt
+/// from the entropy fallback in ordinary source files; a bare high-entropy
+/// path-like run without URL context is still flagged.
+#[test]
+fn content_address_shapes_not_flagged() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("build_info.py"),
+        concat!(
+            "IMAGE_DIGEST = \"c64d871ed5491a6571948dd48eabd185b46c6c23b64e3afd0c059fc7593ada30\"\n",
+            "GIT_SHA = \"da39a3ee5e6b4b0d3255bfef95601890afd80709\"\n",
+            "SESSION = \"48ca8a53-f08e-4065-aebf-02c8604e3185\"\n",
+            "WHEEL = \"https://files.pythonhosted.org/packages/a4/c0/1117d53077e3ac3152503a84e9cf7a5c2395768/matplotlib-3.11.0.whl\"\n",
+        ),
+    )
+    .unwrap();
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        findings.as_array().unwrap().is_empty(),
+        "content-address shapes flagged: {findings:?}"
+    );
+
+    // Control: the same kind of run outside a URL, at a non-digest length,
+    // still fires — the heuristic is narrowed, not disabled.
+    std::fs::write(
+        project.path().join("bare.txt"),
+        "blob = a4c01117d53077e3ac3152503a84e9cf7a5c2395768matplotlib\n",
+    )
+    .unwrap();
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        finding_paths_contain(&findings, "bare.txt"),
+        "narrowed heuristic must still fire on bare runs: {findings:?}"
+    );
+}
+
+fn finding_paths_contain(findings: &serde_json::Value, path: &str) -> bool {
+    findings
+        .as_array()
+        .map(|arr| arr.iter().any(|f| f["location"]["path"] == path))
+        .unwrap_or(false)
+}
+
+/// IDE metadata is built-in noise.
+#[test]
+fn ide_metadata_entropy_suppressed() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir(project.path().join(".idea")).unwrap();
+    std::fs::write(
+        project.path().join(".idea/workspace.xml"),
+        "<component value=\"Zx9Qw3Vb7Nk2Rt5Yu8Pm1Lo4Hf6Gd0Sa\" />\n",
+    )
+    .unwrap();
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(findings.as_array().unwrap().is_empty(), "{findings:?}");
+}
+
+/// `[scan.secrets] entropy_exclude` extends the built-in noise list; the
+/// file is still walked (a provider credential there is still found).
+#[test]
+fn entropy_exclude_config_extends_builtin() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir(project.path().join("fixtures")).unwrap();
+    std::fs::write(
+        project.path().join("fixtures/data.txt"),
+        format!("blob = Zx9Qw3Vb7Nk2Rt5Yu8Pm1Lo4Hf6Gd0Sa\nkey = {AWS_KEY_ID}\n"),
+    )
+    .unwrap();
+
+    // Without config: the entropy blob fires.
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        findings.as_array().unwrap().iter().any(|f| f["identity"]["rule_id"] == "high-entropy-string"),
+        "{findings:?}"
+    );
+
+    // With entropy_exclude: entropy silenced, precise rule still fires.
+    std::fs::write(
+        project.path().join("multiscan.toml"),
+        "[scan.secrets]\nentropy_exclude = [\"fixtures/**\"]\n",
+    )
+    .unwrap();
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let arr = findings.as_array().unwrap();
+    assert!(!arr.iter().any(|f| f["identity"]["rule_id"] == "high-entropy-string"), "{arr:?}");
+    assert!(arr.iter().any(|f| f["identity"]["rule_id"] == "aws-access-key-id"), "{arr:?}");
+}

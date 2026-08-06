@@ -27,6 +27,15 @@
         "exclude": { "description": "Additional glob patterns excluded for this layer only. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it.", "type": "array", "items": { "type": "string" } }
       }
     },
+    "SecretsScanConfig": {
+      "description": "[scan.secrets] overrides (ADR 0004, ADR 0005): the per-layer exclude plus entropy-noise control.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exclude": { "description": "Additional glob patterns excluded for the secrets layer only. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it.", "type": "array", "items": { "type": "string" } },
+        "entropy_exclude": { "description": "Globs where the high-entropy fallback is silenced; precise provider rules still run there. Extends the built-in known-noise list (lockfiles, IDE metadata, minified assets — ADR 0005).", "type": "array", "items": { "type": "string" } }
+      }
+    },
     "ScanConfig": {
       "description": "[scan] section (spec 4.5).",
       "type": "object",
@@ -36,7 +45,7 @@
         "profile": { "description": "Scan profile; default standard.", "$ref": "#/definitions/Profile" },
         "exclude": { "description": "Glob patterns to exclude, all layers. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it. Committable, machine-independent (CLI-007).", "type": "array", "items": { "type": "string" } },
         "sca": { "description": "SCA-layer overrides ([scan.sca]).", "$ref": "#/definitions/LayerScanConfig" },
-        "secrets": { "description": "Secrets-layer overrides ([scan.secrets]).", "$ref": "#/definitions/LayerScanConfig" },
+        "secrets": { "description": "Secrets-layer overrides ([scan.secrets]).", "$ref": "#/definitions/SecretsScanConfig" },
         "iac": { "description": "IaC-layer overrides ([scan.iac]).", "$ref": "#/definitions/LayerScanConfig" }
       }
     },

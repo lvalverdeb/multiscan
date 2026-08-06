@@ -7,6 +7,7 @@
 
 mod entropy;
 mod fingerprint;
+mod noise;
 mod rules;
 
 use std::path::{Path, PathBuf};
@@ -157,7 +158,12 @@ impl Engine for SecretsEngine {
             let Ok(text) = std::fs::read_to_string(&abs) else {
                 continue; // binary or unreadable — skip, not an error
             };
-            self.scan_text(&text, &rel, sink)
+            // ADR 0005: known-noise files (built-in list + configured
+            // entropy_exclude) keep the precise rules but lose the entropy
+            // fallback — their high-entropy content is checksums, not secrets.
+            let entropy_enabled = !noise::entropy_noise_path(&rel)
+                && !ctx.excludes.is_entropy_excluded(&rel);
+            self.scan_text(&text, &rel, entropy_enabled, sink)
                 .map_err(|e| EngineError::Failed(e.to_string()))?;
         }
 
@@ -172,6 +178,7 @@ impl SecretsEngine {
         &self,
         text: &str,
         path: &str,
+        entropy_enabled: bool,
         sink: &mut dyn FindingSink,
     ) -> Result<(), multiscan_engine::SinkError> {
         for (idx, line) in text.lines().enumerate() {
@@ -204,11 +211,19 @@ impl SecretsEngine {
 
             // Entropy fallback: only when no precise rule already fired on this
             // line, to avoid double-reporting the same secret. Capped at
-            // Medium/Heuristic (SEC-103).
-            if !matched_here {
+            // Medium/Heuristic (SEC-103). Skipped entirely on known-noise
+            // files, and per-token for content-address shapes — digests,
+            // UUIDs, URL-embedded runs (ADR 0005).
+            if !matched_here && entropy_enabled {
                 let Some(token) = &self.token else { continue };
                 for m in token.find_iter(line) {
                     let candidate = m.as_str();
+                    if noise::digest_shaped(candidate)
+                        || noise::uuid_shaped(candidate)
+                        || noise::in_url_context(line, m.start())
+                    {
+                        continue;
+                    }
                     if candidate.len() >= ENTROPY_MIN_LEN
                         && shannon_bits(candidate.as_bytes()) >= ENTROPY_MIN_BITS
                     {
