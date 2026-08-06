@@ -29,6 +29,12 @@ pub struct FeedSources {
     pub osv_base_url: String,
     /// OSV ecosystems to mirror (Q-01: local mirror is the default posture).
     pub osv_ecosystems: Vec<String>,
+    /// Optional secrets rule-pack URL (ADR 0010): when set, `update` fetches
+    /// it into the snapshot as `rules/secrets.json`, so detector updates ride
+    /// the same channel as advisory data. `None` (the default) leaves the
+    /// embedded pack in force. The host must be feed-allow-listed like any
+    /// other feed URL.
+    pub rules_url: Option<String>,
 }
 
 impl Default for FeedSources {
@@ -54,6 +60,9 @@ impl Default for FeedSources {
             .into_iter()
             .map(String::from)
             .collect(),
+            // No public rules feed exists yet; opt in via config/env so the
+            // default `db update` behaves exactly as before.
+            rules_url: None,
         }
     }
 }
@@ -88,9 +97,23 @@ pub fn update(
         osv_counts.insert(ecosystem.clone(), count);
     }
 
+    // Optional secrets rule pack (ADR 0010). Fetched through the same
+    // allow-listed client; stored verbatim and validated at consume time, so
+    // a malformed pack degrades to the embedded baseline rather than breaking
+    // the whole update.
+    let mut rule_packs: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    if let Some(rules_url) = &sources.rules_url {
+        eprintln!("multiscan db update: fetching secrets rule pack...");
+        let bytes = client.fetch(rules_url)?;
+        rule_packs.insert("secrets".to_string(), bytes);
+    }
+
     let mut source_map = BTreeMap::new();
     source_map.insert("kev".to_string(), sources.kev_url.clone());
     source_map.insert("epss".to_string(), sources.epss_url.clone());
+    if let Some(rules_url) = &sources.rules_url {
+        source_map.insert("rules/secrets".to_string(), rules_url.clone());
+    }
     for ecosystem in &sources.osv_ecosystems {
         source_map.insert(
             format!("osv/{ecosystem}"),
@@ -104,10 +127,7 @@ pub fn update(
             kev_json,
             epss_csv,
             osv_jsonl,
-            // Live update fetches advisory feeds only; rule packs are
-            // distributed via signed air-gap bundles (ADR 0010), not the
-            // network fetch, until a dedicated rules-feed URL exists.
-            rule_packs: BTreeMap::new(),
+            rule_packs,
             counts: SnapshotCounts {
                 kev: kev_count,
                 epss: epss_count,

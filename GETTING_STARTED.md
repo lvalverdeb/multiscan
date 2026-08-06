@@ -56,11 +56,19 @@ Re-run `db update` periodically. A new CVE reaches you as a **data refresh**, no
 a tool upgrade. If you skip this, secrets and IaC scanning still work, but SCA
 will warn that its advisory data is missing.
 
-The same channel can carry **secrets detection rules**: a feed snapshot may
-ship a `secrets` rule pack, so new detectors also arrive as a data refresh, not
-a binary release (ADR 0010). The pack is digest-verified (and signed, in an
-air-gap bundle); if it is absent or invalid, the embedded builtin pack is used.
-`--verbose` prints which pack ran. Distribute one via a signed bundle (§10).
+The same channel can carry **detection rules** — `secrets`, `iac`, and `probe`
+packs — so new detectors also arrive as a data refresh, not a binary release
+(ADR 0010). A pack is digest-verified (and signed, in an air-gap bundle); if it
+is absent or invalid, the embedded builtin is used, and `--verbose` prints
+which pack ran. Distribute one via a signed bundle (§10), or point `db update`
+at a self-hosted secrets pack:
+
+```bash
+MULTISCAN_RULES_URL=https://feeds.internal/secrets-pack.json multiscan db update
+```
+
+Setting the URL opts its host into the feed allow-list (https only); the pack
+is stored verbatim and validated when a scan consumes it.
 
 *(Air-gapped? See §10 for signed offline bundles.)*
 

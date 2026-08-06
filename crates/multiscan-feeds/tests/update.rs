@@ -100,6 +100,7 @@ fn update_writes_pinned_snapshot_end_to_end() {
         epss_url: format!("{base}/epss.csv.gz"),
         osv_base_url: base.clone(),
         osv_ecosystems: vec!["npm".to_string()],
+        rules_url: None,
     };
     let now = chrono::Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
 
@@ -188,4 +189,38 @@ fn identical_content_same_day_converges_on_one_snapshot_id() {
     let first = write_snapshot(cache.path(), &data(), now).unwrap();
     let second = write_snapshot(cache.path(), &data(), now).unwrap();
     assert_eq!(first.manifest.snapshot_id, second.manifest.snapshot_id);
+}
+
+/// ADR 0010: with a rules_url configured, `update` fetches the secrets rule
+/// pack into the snapshot as `rules/secrets.json`, digest-verified.
+#[test]
+fn update_fetches_rules_pack_into_snapshot() {
+    const PACK: &str = r#"{"pack_id":"feed-secrets","version":"1.0.0","rules":[]}"#;
+    let mut routes = BTreeMap::new();
+    routes.insert("/kev.json".to_string(), KEV_FIXTURE.as_bytes().to_vec());
+    routes.insert("/epss.csv.gz".to_string(), gzip(EPSS_FIXTURE.as_bytes()));
+    routes.insert("/npm/all.zip".to_string(), osv_zip());
+    routes.insert("/rules.json".to_string(), PACK.as_bytes().to_vec());
+    let (base, handle) = serve(routes);
+
+    let cache = tempfile::tempdir().unwrap();
+    let client = FeedClient::with_allowlist(["127.0.0.1".to_string()]);
+    let sources = FeedSources {
+        kev_url: format!("{base}/kev.json"),
+        epss_url: format!("{base}/epss.csv.gz"),
+        osv_base_url: base.clone(),
+        osv_ecosystems: vec!["npm".to_string()],
+        rules_url: Some(format!("{base}/rules.json")),
+    };
+    let now = chrono::Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
+
+    update(&client, &sources, cache.path(), now).unwrap();
+    stop(&base, handle);
+
+    let snapshot = current_snapshot(cache.path()).unwrap().expect("pinned");
+    let pack = snapshot
+        .rule_pack("secrets")
+        .expect("snapshot carries the rules pack")
+        .expect("digest verifies");
+    assert_eq!(pack, PACK.as_bytes(), "pack bytes round-trip through the snapshot");
 }

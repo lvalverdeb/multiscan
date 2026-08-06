@@ -72,8 +72,22 @@ fn import(bundle: &std::path::Path, trusted_key: Option<&str>) -> Result<Exit> {
 }
 
 fn update() -> Result<Exit> {
-    let client = FeedClient::new();
-    let sources = FeedSources::default();
+    let mut sources = FeedSources::default();
+    // Opt-in secrets rule-pack feed (ADR 0010). Setting MULTISCAN_RULES_URL
+    // both configures the fetch and — since the operator explicitly chose
+    // this host — allow-lists it for the feed client (R-6: the allow-list
+    // only ever widens by explicit operator action, never silently).
+    let client = match std::env::var("MULTISCAN_RULES_URL").ok().filter(|u| !u.is_empty()) {
+        Some(url) => {
+            let allow = multiscan_feeds::DEFAULT_ALLOWED_HOSTS
+                .iter()
+                .map(|h| h.to_string())
+                .chain(feed_host(&url));
+            sources.rules_url = Some(url);
+            FeedClient::with_allowlist(allow)
+        }
+        None => FeedClient::new(),
+    };
     match multiscan_feeds::update(&client, &sources, &cache_dir(), chrono::Utc::now()) {
         Ok(_) => Ok(Exit::Clean),
         Err(err) => {
@@ -81,6 +95,17 @@ fn update() -> Result<Exit> {
             Ok(Exit::FeedsStale)
         }
     }
+}
+
+/// The host component of a URL, for allow-listing. `FeedClient::fetch`
+/// re-parses and re-validates (https + allow-list) before connecting, so this
+/// only needs to extract the host to widen the list; a malformed URL yields
+/// no host and the fetch is refused.
+fn feed_host(url: &str) -> Option<String> {
+    let authority = url.split("://").nth(1)?.split('/').next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let host = host.split(':').next().unwrap_or(host);
+    (!host.is_empty()).then(|| host.to_string())
 }
 
 fn status() -> Result<Exit> {
