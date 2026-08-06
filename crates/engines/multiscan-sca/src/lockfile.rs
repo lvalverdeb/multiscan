@@ -45,6 +45,10 @@ pub fn parser_for(file_name: &str) -> Option<ParseFn> {
         "poetry.lock" => Some(parse_poetry_lock),
         "Gemfile.lock" => Some(parse_gemfile_lock),
         "composer.lock" => Some(parse_composer_lock),
+        "gradle.lockfile" => Some(parse_gradle_lockfile),
+        // pom.xml is Maven's primary source (Maven has no separate lockfile),
+        // so it is a regular input, not a shadowed manifest.
+        "pom.xml" => Some(parse_pom_xml),
         // Manifests: parsed only as fallback when their lockfile is absent
         // (see `shadowing_lockfiles`); ranges surface as SCA-001 unpinned.
         "package.json" => Some(parse_package_json),
@@ -70,6 +74,8 @@ pub const SUPPORTED_FILES: &[&str] = &[
     "poetry.lock",
     "Gemfile.lock",
     "composer.lock",
+    "gradle.lockfile",
+    "pom.xml",
     "package.json",
     "pyproject.toml",
     "go.mod",
@@ -596,6 +602,124 @@ fn parse_composer_lock(text: &str) -> Result<Vec<ResolvedPackage>, String> {
             direct: false,
         })
         .collect())
+}
+
+// ---- gradle.lockfile (Gradle dependency locking; group:artifact:version) ----
+
+fn parse_gradle_lockfile(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        // Comments and the `empty=<configs>` marker line carry no coordinate.
+        if line.is_empty() || line.starts_with('#') || line.starts_with("empty=") {
+            continue;
+        }
+        // `group:artifact:version=conf1,conf2`
+        let coord = line.split('=').next().unwrap_or("");
+        let parts: Vec<&str> = coord.split(':').collect();
+        if parts.len() != 3 || parts.iter().any(|p| p.is_empty()) {
+            continue;
+        }
+        out.push(ResolvedPackage {
+            ecosystem: "Maven".to_string(),
+            purl_type: "maven".to_string(),
+            name: format!("{}:{}", parts[0], parts[1]),
+            version: Some(parts[2].to_string()),
+            // gradle.lockfile records the resolved graph, not direct/transitive.
+            direct: false,
+        });
+    }
+    Ok(out)
+}
+
+// ---- pom.xml (Maven; bounded hand-rolled tag scan, comment-stripped) ----
+
+const MAX_POM_DEPENDENCIES: usize = 100_000;
+
+/// Inner text of the first `<tag>…</tag>` within `block`, tolerating an
+/// attribute list on the open tag (`<version foo="bar">`). `None` if absent.
+fn xml_first(block: &str, tag: &str) -> Option<String> {
+    let mut from = 0;
+    let open = format!("<{tag}");
+    while let Some(rel) = block[from..].find(&open) {
+        let after = from + rel + open.len();
+        // The char after the tag name must end the name (`>`, space, `/`).
+        match block[after..].chars().next() {
+            Some('>') => {
+                let start = after + 1;
+                let end = block[start..].find(&format!("</{tag}>"))?;
+                return Some(block[start..start + end].trim().to_string());
+            }
+            Some(c) if c.is_whitespace() => {
+                let gt = block[after..].find('>')? + after + 1;
+                let end = block[gt..].find(&format!("</{tag}>"))?;
+                return Some(block[gt..gt + end].trim().to_string());
+            }
+            // A longer tag name (e.g. `<versioning>` when tag=`version`); keep
+            // looking past this occurrence.
+            _ => from = after,
+        }
+    }
+    None
+}
+
+/// Strip XML comments so commented-out `<dependency>` blocks never register.
+/// Bounded: unterminated comments drop the remainder.
+fn strip_xml_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("<!--") {
+        out.push_str(&rest[..start]);
+        match rest[start..].find("-->") {
+            Some(end) => rest = &rest[start + end + 3..],
+            None => return out, // unterminated: drop the tail
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn parse_pom_xml(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    let text = strip_xml_comments(text);
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(rel) = text[from..].find("<dependency>") {
+        if out.len() >= MAX_POM_DEPENDENCIES {
+            break;
+        }
+        let start = from + rel + "<dependency>".len();
+        let Some(close) = text[start..].find("</dependency>") else {
+            break;
+        };
+        let block = &text[start..start + close];
+        from = start + close + "</dependency>".len();
+
+        let (Some(group), Some(artifact)) =
+            (xml_first(block, "groupId"), xml_first(block, "artifactId"))
+        else {
+            continue;
+        };
+        if group.is_empty() || artifact.is_empty() {
+            continue;
+        }
+        // An exact literal pins; a property reference (`${jackson.version}`),
+        // a range (`[1.0,2.0)`), or an absent version (managed elsewhere) is
+        // unpinned — surfaced as SCA-001, never silently dropped.
+        let version = xml_first(block, "version").filter(|v| {
+            !v.is_empty()
+                && !v.contains('$')
+                && !v.starts_with('[')
+                && !v.starts_with('(')
+        });
+        out.push(ResolvedPackage {
+            ecosystem: "Maven".to_string(),
+            purl_type: "maven".to_string(),
+            name: format!("{group}:{artifact}"),
+            version,
+            direct: true,
+        });
+    }
+    Ok(out)
 }
 
 // ---- Manifests (fallback when no lockfile shadows them) ----
@@ -1354,6 +1478,84 @@ proptest = "1"
             pkgs.iter().find(|p| p.name == "real-name").unwrap().version.as_deref(),
             Some("3.0.0")
         );
+    }
+
+    #[test]
+    fn gradle_lockfile_parses_coordinates() {
+        let text = "\
+# This is a Gradle generated file for dependency locking.
+com.fasterxml.jackson.core:jackson-databind:2.12.1=compileClasspath,runtimeClasspath
+org.slf4j:slf4j-api:1.7.30=compileClasspath
+empty=annotationProcessor
+";
+        let pkgs = parse_gradle_lockfile(text).unwrap();
+        assert_eq!(pkgs.len(), 2, "empty= line and comment skipped");
+        assert_eq!(
+            pkgs[0].purl(),
+            "pkg:maven/com.fasterxml.jackson.core:jackson-databind@2.12.1"
+        );
+        assert_eq!(pkgs[0].ecosystem, "Maven");
+    }
+
+    #[test]
+    fn pom_xml_pins_ranges_and_ignores_comments() {
+        let text = r#"
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.12.1</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>${slf4j.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-lang3</artifactId>
+    </dependency>
+    <!--
+    <dependency>
+      <groupId>evil</groupId><artifactId>commented</artifactId><version>1.0</version>
+    </dependency>
+    -->
+  </dependencies>
+</project>
+"#;
+        let pkgs = parse_pom_xml(text).unwrap();
+        assert_eq!(pkgs.len(), 3, "commented dependency must not register");
+        assert!(!pkgs.iter().any(|p| p.name.contains("evil")));
+        let jackson = pkgs
+            .iter()
+            .find(|p| p.name == "com.fasterxml.jackson.core:jackson-databind")
+            .unwrap();
+        assert_eq!(jackson.version.as_deref(), Some("2.12.1"));
+        // Property reference and absent version are unpinned (SCA-001).
+        assert!(pkgs.iter().find(|p| p.name == "org.slf4j:slf4j-api").unwrap().version.is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "org.apache.commons:commons-lang3")
+            .unwrap()
+            .version
+            .is_none());
+    }
+
+    #[test]
+    fn pom_xml_tolerates_attributes_and_namespaced_siblings() {
+        // `<version>` must not be confused with `<versioning>`, and an
+        // attribute on the open tag is tolerated.
+        let text = r#"
+<dependency>
+  <groupId >org.example</groupId>
+  <artifactId>widget</artifactId>
+  <version xml:lang="en">3.4.5</version>
+</dependency>
+"#;
+        let pkgs = parse_pom_xml(text).unwrap();
+        assert_eq!(pkgs.len(), 1);
+        assert_eq!(pkgs[0].version.as_deref(), Some("3.4.5"));
     }
 
     #[test]

@@ -441,3 +441,66 @@ fn go_mod_fallback_resolves_with_directness() {
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(advisory_ids(&findings), vec!["GHSA-2c4m-59x9-fr2g"]);
 }
+
+/// pom.xml resolves Maven advisories with Maven version ordering; a
+/// property-interpolated version surfaces as SCA-001 unpinned, never dropped.
+#[test]
+fn pom_xml_resolves_maven_advisory() {
+    let cache = tempfile::tempdir().unwrap();
+    // jackson-databind < 2.12.7.1 (a real-shaped advisory with a 4-segment fix).
+    let jackson = r#"{"id":"GHSA-jjjj-jackson","summary":"jackson deserialization","database_specific":{"severity":"HIGH"},"affected":[{"package":{"ecosystem":"Maven","name":"com.fasterxml.jackson.core:jackson-databind"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"2.12.7.1"}]}]}]}"#;
+    seed_ecosystems(cache.path(), &[("Maven", jackson)]);
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("pom.xml"),
+        r#"<project>
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.12.1</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>${slf4j.version}</version>
+    </dependency>
+  </dependencies>
+</project>"#,
+    )
+    .unwrap();
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    let arr = findings.as_array().unwrap();
+    // One advisory match + one unpinned declaration.
+    let vuln = arr
+        .iter()
+        .find(|f| f["identity"]["advisory_id"] == "GHSA-jjjj-jackson")
+        .expect("jackson advisory");
+    assert_eq!(vuln["remediation"]["fixed_version"], "2.12.7.1");
+    assert_eq!(
+        vuln["asset"]["identifier"],
+        "pkg:maven/com.fasterxml.jackson.core:jackson-databind@2.12.1"
+    );
+    assert!(arr
+        .iter()
+        .any(|f| f["identity"]["advisory_id"] == "native:sca:unpinned"
+            && f["asset"]["identifier"] == "pkg:maven/org.slf4j:slf4j-api"));
+}
+
+/// gradle.lockfile resolves Maven advisories.
+#[test]
+fn gradle_lockfile_resolves_maven_advisory() {
+    let cache = tempfile::tempdir().unwrap();
+    let logback = r#"{"id":"GHSA-logback-1","summary":"logback vuln","database_specific":{"severity":"MODERATE"},"affected":[{"package":{"ecosystem":"Maven","name":"ch.qos.logback:logback-core"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.2.13"}]}]}]}"#;
+    seed_ecosystems(cache.path(), &[("Maven", logback)]);
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("gradle.lockfile"),
+        "# Gradle dependency locking\nch.qos.logback:logback-core:1.2.11=runtimeClasspath\norg.slf4j:slf4j-api:2.0.7=runtimeClasspath\nempty=annotationProcessor\n",
+    )
+    .unwrap();
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(advisory_ids(&findings), vec!["GHSA-logback-1"]);
+}

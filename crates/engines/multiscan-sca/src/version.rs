@@ -26,9 +26,12 @@ pub enum Scheme {
     /// Packagist — Composer normalization: optional `v`, stability suffixes
     /// dev < alpha < beta < RC < stable < patch.
     Composer,
+    /// Maven — a subset of ComparableVersion: numeric segments compared
+    /// numerically, known qualifiers ranked (alpha < beta < milestone < rc <
+    /// snapshot < release < sp), SNAPSHOT below its release.
+    Maven,
     /// Fallback: dotted numeric segments, then lexical. Used where a precise
-    /// scheme is not yet wired (Maven/etc. get dedicated schemes as their
-    /// fixtures land). Never a silent naive string compare.
+    /// scheme is not yet wired. Never a silent naive string compare.
     Generic,
 }
 
@@ -46,6 +49,7 @@ impl Scheme {
             "Red Hat" | "Rocky Linux" | "AlmaLinux" | "openSUSE" | "SUSE" | "Fedora" => Scheme::Rpm,
             "RubyGems" => Scheme::RubyGems,
             "Packagist" => Scheme::Composer,
+            "Maven" => Scheme::Maven,
             _ => Scheme::Generic,
         }
     }
@@ -62,9 +66,97 @@ impl Scheme {
             Scheme::Rpm => cmp_rpm(a, b),
             Scheme::RubyGems => cmp_rubygems(a, b),
             Scheme::Composer => cmp_composer(a, b),
+            Scheme::Maven => cmp_maven(a, b),
             Scheme::Generic => cmp_generic(a, b),
         }
     }
+}
+
+/// Maven ComparableVersion (subset). Tokenize on `.` / `-` and on
+/// digit↔letter boundaries; numeric tokens compare numerically, qualifier
+/// tokens by a known ranking. When one side runs out, the missing token is
+/// the release baseline (numeric 0 against a number, empty qualifier against
+/// a qualifier) — so `1.0 == 1.0.0` and `1.0 > 1.0-alpha`. A subset, but
+/// faithful for the release-grade bounds OSV Maven advisories use.
+fn cmp_maven(a: &str, b: &str) -> Ordering {
+    /// alpha < beta < milestone < rc < snapshot < "" (release) < sp <
+    /// unknown. Unknown qualifiers sort after all known ones, then lexically.
+    fn qual_rank(q: &str) -> i32 {
+        match q {
+            "alpha" | "a" => 1,
+            "beta" | "b" => 2,
+            "milestone" | "m" => 3,
+            "rc" | "cr" => 4,
+            "snapshot" => 5,
+            "" | "ga" | "final" | "release" => 6,
+            "sp" => 7,
+            _ => 8,
+        }
+    }
+    enum Item {
+        Num(u64),
+        Qual(String),
+    }
+    fn tokenize(v: &str) -> Vec<Item> {
+        let lower = v.trim().to_ascii_lowercase();
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        let mut cur_digit = false;
+        let flush = |cur: &mut String, digit: bool, out: &mut Vec<Item>| {
+            if cur.is_empty() {
+                return;
+            }
+            if digit {
+                out.push(Item::Num(cur.parse().unwrap_or(0)));
+            } else if matches!(cur.as_str(), "ga" | "final" | "release") {
+                // Release synonyms are the null qualifier: drop them so
+                // `1.0-ga` == `1.0` == `1.0.0` (Maven null-value trimming).
+                cur.clear();
+            } else {
+                out.push(Item::Qual(std::mem::take(cur)));
+            }
+            cur.clear();
+        };
+        for c in lower.chars() {
+            if c == '.' || c == '-' || c == '_' || c == '+' {
+                flush(&mut cur, cur_digit, &mut out);
+                continue;
+            }
+            let is_digit = c.is_ascii_digit();
+            if !cur.is_empty() && is_digit != cur_digit {
+                flush(&mut cur, cur_digit, &mut out);
+            }
+            cur_digit = is_digit;
+            cur.push(c);
+        }
+        flush(&mut cur, cur_digit, &mut out);
+        out
+    }
+    fn cmp_item(x: Option<&Item>, y: Option<&Item>) -> Ordering {
+        match (x, y) {
+            (Some(Item::Num(a)), Some(Item::Num(b))) => a.cmp(b),
+            (Some(Item::Qual(a)), Some(Item::Qual(b))) => {
+                qual_rank(a).cmp(&qual_rank(b)).then_with(|| a.cmp(b))
+            }
+            // A numeric item always outranks a qualifier item.
+            (Some(Item::Num(_)), Some(Item::Qual(_))) => Ordering::Greater,
+            (Some(Item::Qual(_)), Some(Item::Num(_))) => Ordering::Less,
+            // Missing side takes the release baseline for the present kind.
+            (None, Some(Item::Num(b))) => 0u64.cmp(b),
+            (Some(Item::Num(a)), None) => a.cmp(&0),
+            (None, Some(Item::Qual(b))) => qual_rank("").cmp(&qual_rank(b)),
+            (Some(Item::Qual(a)), None) => qual_rank(a).cmp(&qual_rank("")),
+            (None, None) => Ordering::Equal,
+        }
+    }
+    let (ta, tb) = (tokenize(a), tokenize(b));
+    for i in 0..ta.len().max(tb.len()) {
+        match cmp_item(ta.get(i), tb.get(i)) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    Ordering::Equal
 }
 
 /// `Gem::Version` ordering. A version is a sequence of segments — numeric
@@ -381,10 +473,29 @@ mod tests {
     }
 
     #[test]
+    fn maven_ordering() {
+        // Double-digit numeric, not string.
+        assert_eq!(Scheme::Maven.compare("1.10", "1.9"), Greater);
+        // Qualifier ranking and SNAPSHOT below release.
+        assert_eq!(Scheme::Maven.compare("1.0-alpha", "1.0-beta"), Less);
+        assert_eq!(Scheme::Maven.compare("1.0-milestone", "1.0-rc"), Less);
+        assert_eq!(Scheme::Maven.compare("1.0-SNAPSHOT", "1.0"), Less);
+        assert_eq!(Scheme::Maven.compare("1.0", "1.0-sp"), Less);
+        // final/ga == release.
+        assert_eq!(Scheme::Maven.compare("1.0-Final", "1.0"), Equal);
+        assert_eq!(Scheme::Maven.compare("1.0-ga", "1.0.0"), Equal);
+        // digit↔letter boundary split: 1.0alpha1 == 1.0-alpha-1.
+        assert_eq!(Scheme::Maven.compare("1.0alpha1", "1.0-alpha-1"), Equal);
+        assert_eq!(Scheme::Maven.compare("1.0-alpha1", "1.0-alpha2"), Less);
+        // Trailing zeros are insignificant.
+        assert_eq!(Scheme::Maven.compare("1.2", "1.2.0"), Equal);
+    }
+
+    #[test]
     fn ecosystem_routing() {
         assert_eq!(Scheme::for_osv_ecosystem("crates.io"), Scheme::Semver);
         assert_eq!(Scheme::for_osv_ecosystem("PyPI"), Scheme::Pep440);
-        assert_eq!(Scheme::for_osv_ecosystem("Maven"), Scheme::Generic);
+        assert_eq!(Scheme::for_osv_ecosystem("Maven"), Scheme::Maven);
         assert_eq!(Scheme::for_osv_ecosystem("RubyGems"), Scheme::RubyGems);
         assert_eq!(Scheme::for_osv_ecosystem("Packagist"), Scheme::Composer);
         assert_eq!(Scheme::for_osv_ecosystem("Go"), Scheme::Semver);
