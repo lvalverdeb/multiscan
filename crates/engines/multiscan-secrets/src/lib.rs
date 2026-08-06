@@ -41,21 +41,17 @@ pub struct SecretsEngine {
 }
 
 impl SecretsEngine {
-    /// Construct the engine with the bundled rule pack.
+    /// Construct the engine with the bundled rule pack. The severity map is
+    /// derived from the pack (ENG-004: explicit, never inferred at match
+    /// time) plus the engine-owned entropy fallback entry.
     pub fn new() -> Self {
-        let severity_map = [
-            ("aws-access-key-id", Severity::High),
-            ("aws-secret-access-key", Severity::Critical),
-            ("github-token", Severity::High),
-            ("slack-token", Severity::High),
-            ("google-api-key", Severity::High),
-            ("private-key-block", Severity::Critical),
-            ("jwt", Severity::Medium),
-            ("high-entropy-string", Severity::Medium),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect();
+        let pack = rules::builtin_pack();
+        let mut severity_map: std::collections::BTreeMap<String, Severity> = pack
+            .rules
+            .iter()
+            .map(|r| (r.id.clone(), r.severity))
+            .collect();
+        severity_map.insert("high-entropy-string".to_string(), Severity::Medium);
 
         Self {
             manifest: EngineManifest {
@@ -65,10 +61,14 @@ impl SecretsEngine {
                 layers: vec![Layer::Secrets],
                 network_impact: NetworkImpact::ReadOnly,
                 requires_authorization: false,
-                rule_set: None,
-                severity_map,
+                rule_set: Some(multiscan_core::RuleSetRef {
+                    id: pack.id,
+                    version: pack.version,
+                    digest: pack.digest,
+                }),
+                severity_map: severity_map.into_iter().collect(),
             },
-            rules: rules::builtin_rules(),
+            rules: pack.rules,
             // Candidate tokens for the entropy detector: long unbroken runs of
             // secret-ish characters. Built fallibly (no panic in library code);
             // if it somehow failed to compile, entropy detection is simply off.
@@ -198,8 +198,8 @@ impl SecretsEngine {
                     matched_here = true;
                     self.emit(
                         sink,
-                        rule.id,
-                        rule.description,
+                        &rule.id,
+                        &rule.description,
                         rule.severity,
                         rule.confidence,
                         value,

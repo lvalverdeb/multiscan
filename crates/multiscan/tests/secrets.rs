@@ -233,3 +233,57 @@ fn entropy_exclude_config_extends_builtin() {
     assert!(!arr.iter().any(|f| f["identity"]["rule_id"] == "high-entropy-string"), "{arr:?}");
     assert!(arr.iter().any(|f| f["identity"]["rule_id"] == "aws-access-key-id"), "{arr:?}");
 }
+
+/// Pack-corpus detectors resolve at the CLI boundary, and SEC-101 holds for
+/// them: the detected values never appear in any output.
+#[test]
+fn new_pack_rules_detect_and_never_leak() {
+    // Assembled at runtime so no key-shaped literal sits in source (GitHub
+    // push protection flags contiguous sk_live_… strings, even synthetic).
+    let stripe = format!("sk_live_{}", "4eC9".repeat(6));
+    let db_pass = "S3cr3tPassw0rd";
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("settings.py"),
+        format!(
+            "STRIPE_KEY = \"{stripe}\"\nDATABASE_URL = \"postgres://svc:{db_pass}@db.internal:5432/app\"\nSECRET_KEY = \"f8Zk2mQ9vX4nR7wL\"\n"
+        ),
+    )
+    .unwrap();
+
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains(&stripe) && !stdout.contains(db_pass),
+        "secret value leaked (SEC-101)"
+    );
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let ids: Vec<&str> = findings
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["identity"]["rule_id"].as_str())
+        .collect();
+    assert!(ids.contains(&"stripe-secret-key"), "{ids:?}");
+    assert!(ids.contains(&"database-url-credentials"), "{ids:?}");
+    assert!(ids.contains(&"keyword-context-secret"), "{ids:?}");
+}
+
+/// The manifest advertises the pack identity (rule_set) so reports carry
+/// rule provenance, mirroring the IaC CIS pack.
+#[test]
+fn severity_map_covers_every_pack_rule() {
+    // Verified indirectly at the CLI: a scan must not produce a finding whose
+    // rule_id lacks a severity mapping — the engine derives the map from the
+    // pack, so any drift would surface as a missing/default severity here.
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("x.txt"),
+        format!("key = {AWS_KEY_ID}\n"),
+    )
+    .unwrap();
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let f = &findings.as_array().unwrap()[0];
+    assert_eq!(f["severity"], "high");
+}

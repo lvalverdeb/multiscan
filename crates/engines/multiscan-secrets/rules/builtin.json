@@ -1,0 +1,154 @@
+{
+  "pack_id": "builtin",
+  "version": "2.1.0",
+  "description": "Bundled secrets rule pack (spec 7.2). Rules are patterns, not code: capture group 1, if present, is the secret value, else the whole match. Patterns are deliberately tight — a provider-attributable prefix or structural marker — so provider rules stay Proven-confidence.",
+  "rules": [
+    {
+      "id": "aws-access-key-id",
+      "description": "AWS access key id",
+      "pattern": "\\b(AKIA[0-9A-Z]{16})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "aws-secret-access-key",
+      "description": "AWS secret access key",
+      "pattern": "(?i)aws_secret_access_key\\s*[:=]\\s*[\"']?([A-Za-z0-9/+]{40})[\"']?",
+      "severity": "critical",
+      "confidence": "proven"
+    },
+    {
+      "id": "github-token",
+      "description": "GitHub personal access / app token",
+      "pattern": "\\b(gh[pousr]_[A-Za-z0-9]{36,255})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "github-fine-grained-pat",
+      "description": "GitHub fine-grained personal access token",
+      "pattern": "\\b(github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "gitlab-pat",
+      "description": "GitLab personal access token",
+      "pattern": "\\b(glpat-[A-Za-z0-9_\\-]{20,64})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "slack-token",
+      "description": "Slack token",
+      "pattern": "\\b(xox[baprs]-[A-Za-z0-9-]{10,72})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "slack-webhook",
+      "description": "Slack incoming webhook URL",
+      "pattern": "(https://hooks\\.slack\\.com/services/T[A-Za-z0-9]{6,12}/B[A-Za-z0-9]{6,12}/[A-Za-z0-9]{18,30})",
+      "severity": "medium",
+      "confidence": "proven"
+    },
+    {
+      "id": "discord-webhook",
+      "description": "Discord webhook URL",
+      "pattern": "(https://discord(?:app)?\\.com/api/webhooks/[0-9]{15,25}/[A-Za-z0-9_\\-]{60,72})",
+      "severity": "medium",
+      "confidence": "proven"
+    },
+    {
+      "id": "google-api-key",
+      "description": "Google API key",
+      "pattern": "\\b(AIza[0-9A-Za-z_\\-]{35})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "npm-token",
+      "description": "npm access token",
+      "pattern": "\\b(npm_[A-Za-z0-9]{36})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "pypi-token",
+      "description": "PyPI upload token",
+      "pattern": "\\b(pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_\\-]{50,})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "stripe-secret-key",
+      "description": "Stripe secret / restricted key",
+      "pattern": "\\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,99})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "sendgrid-api-key",
+      "description": "SendGrid API key",
+      "pattern": "\\b(SG\\.[A-Za-z0-9_\\-]{22}\\.[A-Za-z0-9_\\-]{43})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "twilio-api-key",
+      "description": "Twilio API key SID",
+      "pattern": "\\b(SK[0-9a-f]{32})\\b",
+      "severity": "high",
+      "confidence": "corroborated"
+    },
+    {
+      "id": "openai-api-key",
+      "description": "OpenAI API key",
+      "pattern": "\\b(sk-[A-Za-z0-9_\\-]{0,40}T3BlbkFJ[A-Za-z0-9_\\-]{20,80})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "anthropic-api-key",
+      "description": "Anthropic API key",
+      "pattern": "\\b(sk-ant-[A-Za-z0-9_\\-]{32,120})\\b",
+      "severity": "high",
+      "confidence": "proven"
+    },
+    {
+      "id": "azure-storage-key",
+      "description": "Azure storage account key",
+      "pattern": "(?i)AccountKey=([A-Za-z0-9+/]{86}==)",
+      "severity": "critical",
+      "confidence": "proven"
+    },
+    {
+      "id": "database-url-credentials",
+      "description": "Database URL with embedded credentials",
+      "pattern": "\\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\\+srv)?|redis|amqps?)://[^\\s:/@\"']{1,64}:([^\\s@\"']{4,128})@",
+      "severity": "high",
+      "confidence": "corroborated"
+    },
+    {
+      "id": "private-key-block",
+      "description": "Private key material",
+      "pattern": "-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----",
+      "severity": "critical",
+      "confidence": "proven"
+    },
+    {
+      "id": "jwt",
+      "description": "JSON Web Token",
+      "pattern": "\\b(eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,})\\b",
+      "severity": "medium",
+      "confidence": "corroborated"
+    },
+    {
+      "id": "keyword-context-secret",
+      "description": "Quoted value assigned to a secret-named variable",
+      "pattern": "(?i)\\b(?:api[_-]?key|api[_-]?secret|secret[_-]?key|auth[_-]?token|access[_-]?token|client[_-]?secret|passwd|password)\\b\\s*[:=]\\s*[\"']([A-Za-z0-9+/_\\-]{16,128})[\"']",
+      "severity": "medium",
+      "confidence": "heuristic"
+    }
+  ]
+}
