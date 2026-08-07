@@ -9,7 +9,7 @@ rewrite.
 
 | ADR | Title | Status | Relationship to the SDD |
 |---|---|---|---|
-| [0001](0001-msrv-1.85.md) | Raise MSRV from 1.78 to 1.85 | Accepted | Deviates from the front-matter MSRV |
+| [0001](0001-msrv-1.85.md) | Raise MSRV from 1.78 to 1.85 | Superseded by [0015](0015-phase2-parser-selection.md) | Deviates from the front-matter MSRV |
 | [0002](0002-scope-authorization-key-management.md) | Scope authorization key management (fail-closed, provided trusted key) | Accepted | Refines §9 authorization |
 | [0003](0003-rename-cli-crate-to-multiscan.md) | Rename the CLI crate from `multiscan-cli` to `multiscan` | Accepted | Deviates from §5 workspace layout |
 | [0004](0004-per-layer-exclude-sections.md) | Per-layer `[scan.<layer>]` exclude sections | Accepted | Extends §4.5 config |
@@ -23,6 +23,7 @@ rewrite.
 | [0012](0012-canonical-vulnerability-identity.md) | Canonical vulnerability identity — merge advisory records by CVE | Accepted | **Amends** §7.7.2 identity tuples |
 | [0013](0013-phase2-initial-language-set.md) | Phase-2 initial language set — Python and JS/TS | Accepted | Extends `docs/phase-2.md`; resolves Q-08, narrows Q-07/Q-09 |
 | [0014](0014-sast-rule-syntax.md) | SAST rule syntax — `MS-PAT-1`, a defined Semgrep subset | Accepted | Extends §7.5; resolves §17 Q-04 |
+| [0015](0015-phase2-parser-selection.md) | Phase-2 source parsers — `ruff_python_parser` + `swc_ecma_parser`, at MSRV 1.95 | Accepted | Supersedes ADR 0001; resolves phase-2 Q-07 |
 
 ## Conventions
 

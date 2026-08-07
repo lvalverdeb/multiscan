@@ -90,7 +90,9 @@ crates/
 schemas/  rules/  testdata/{corpus,vectors,lab}/  fuzz/  docs/
 ```
 
-MSRV 1.78, edition 2021. Workspace-level dependency versions only — no per-crate version drift.
+MSRV 1.85 (ADR 0001), edition 2021. Rising to 1.95 with `T-702` (ADR 0015 — phase-2 source parsers);
+until that lands, 1.85 is the floor and dependencies that require more are pinned back.
+Workspace-level dependency versions only — no per-crate version drift.
 
 ---
 

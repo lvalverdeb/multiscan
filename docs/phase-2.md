@@ -80,11 +80,12 @@ Constraints that bite here:
   knowledge, and a bespoke minimal syntax has no community corpus written in it. The initial pack must
   be adopted or mechanically translated from a community corpus; the Q-04 syntax decision is its own
   ADR, due before T-705, and "minimal bespoke syntax + hand-written rules" is not on the table.
-- **Parser choice is the phase's biggest unresolved decision** (Q-07 below). tree-sitter is the obvious
-  answer and pulls C and `unsafe` into the tree; `#![forbid(unsafe_code)]` still holds for our crates,
-  but non-negotiable #1's "wrap it or drop it" needs an explicit, reviewed answer, not a default.
-- **Binary size.** Grammars are megabytes each. `NFR-004` is a hard 30 MB. Either the initial language
-  set stays small, or grammars ship as downloadable packs — decide before T-702, not after.
+- **Parser choice is settled** (Q-07, ADR 0015): `ruff_python_parser` and `swc_ecma_parser`, pure Rust,
+  at MSRV 1.95. tree-sitter was rejected on the size of the non-negotiable #1 commitment, not on
+  performance. Both parser ASTs stay behind the front-end boundary so upstream churn is contained.
+- **Binary size is not the constraint it looked like.** The two parsers add ~2.4 MiB to a 9.8 MiB binary
+  against the 30 MB `NFR-004` cap; the megabyte-per-grammar worry applies to tree-sitter, not to these.
+  MSRV, not size, was what actually bound the choice.
 - **Parsing untrusted source is the threat model.** Fuzz target is release-blocking; bound allocation
   by input size, cap tree depth and node counts.
 - **Determinism.** A new output-producing engine inherits DET-001/002 in full: ordered maps throughout,
@@ -165,14 +166,16 @@ The API path is a feed fetch, not a scan-target request — it belongs on the al
 
 | ID | Question | Conservative default (R-7) |
 |---|---|---|
-| Q-07 | tree-sitter (C, `unsafe`, large grammars) vs a pure-Rust parsing layer? | Narrowed by ADR 0013: pure-Rust parser families evaluated first against an explicit gate; tree-sitter only via its own stop-and-ask ADR. |
+| Q-07 | tree-sitter (C, `unsafe`, large grammars) vs a pure-Rust parsing layer? | **Resolved by ADR 0015: pure Rust — `ruff_python_parser` and `swc_ecma_parser`, at MSRV 1.95 (superseding ADR 0001).** |
 | Q-08 | Which languages first? | **Resolved by ADR 0013: Python and JavaScript/TypeScript.** |
-| Q-09 | Do grammars ship in the binary or as downloadable packs? | Per ADR 0013: in-binary at two languages; `T-702` PR states the size delta against `NFR-004`. |
+| Q-09 | Do grammars ship in the binary or as downloadable packs? | **Settled in-binary by ADR 0015's measurements:** the two parsers add ~2.4 MiB to a 9.8 MiB binary against the 30 MB `NFR-004` cap. `T-702` PR still states the measured delta. |
 | Q-10 | Where does advisory symbol data for reachability come from? | OSV where present; `Unknown` otherwise. Do not author symbol lists — that is authoring vulnerability knowledge, which §1.2 forbids. ADR 0013 defers symbol-level reachability until a symbol-rich ecosystem (Go, Rust) joins the set; workstream B starts at module granularity. |
 
 ## Stop-and-ask list for this phase
 
-Per CLAUDE.md, these need a decision before code, not a judgement call during it: adding the `unsafe`-
-bearing parser dependency (Q-07); anything touching `finding_id` construction for SAST identity; any
-widening of structural matching toward taint (`NG-2`); and any freshness path that could reach a scan
-target outside `multiscan-scope`.
+Per CLAUDE.md, these need a decision before code, not a judgement call during it: anything touching
+`finding_id` construction for SAST identity; any widening of structural matching toward taint (`NG-2`);
+and any freshness path that could reach a scan target outside `multiscan-scope`.
+
+Cleared: the parser dependency and its MSRV consequence (Q-07) were decided in ADR 0015. Reopening that
+choice — including any return to tree-sitter — is a new ADR, not a `T-702` implementation detail.

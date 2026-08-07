@@ -6,7 +6,7 @@ status: Draft
 date: 2026-08-05
 audience: [human-engineers, llm-coding-agents]
 normative_keywords: RFC-2119 (MUST / MUST NOT / SHOULD / SHOULD NOT / MAY)
-language: Rust (2021 edition, MSRV 1.78)
+language: Rust (2021 edition, MSRV 1.78 — raised to 1.85 by ADR 0001; raised to 1.95 by ADR 0015, landing with T-702)
 ---
 
 # 0. How to Use This Document
