@@ -22,6 +22,7 @@ rewrite.
 | [0011](0011-history-flag-amends-sec-104.md) | Amend SEC-104 — `--history` over all reachable objects | Accepted | **Amends** SEC-104 (§7.2) |
 | [0012](0012-canonical-vulnerability-identity.md) | Canonical vulnerability identity — merge advisory records by CVE | Accepted | **Amends** §7.7.2 identity tuples |
 | [0013](0013-phase2-initial-language-set.md) | Phase-2 initial language set — Python and JS/TS | Accepted | Extends `docs/phase-2.md`; resolves Q-08, narrows Q-07/Q-09 |
+| [0014](0014-sast-rule-syntax.md) | SAST rule syntax — `MS-PAT-1`, a defined Semgrep subset | Proposed | Extends §7.5; resolves §17 Q-04 |
 
 ## Conventions
 

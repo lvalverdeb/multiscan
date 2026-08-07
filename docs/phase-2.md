@@ -44,8 +44,9 @@ taint is out of scope no matter how it is framed.
 `NG-4` settles Q-06: no daemon, no server, no cross-machine history service. `Store` stays a trait.
 
 Also still out: third-party WASM engines (Q-05, re-deferred — Bridges cover external tooling), and
-Semgrep rule-syntax compatibility (Q-04 conservative default: define a minimal syntax first,
-compatibility only on demonstrated demand).
+*full* Semgrep rule-syntax compatibility — ADR 0014 (proposed) resolves Q-04 as `MS-PAT-1`, a
+documented structural subset with a mechanically translated corpus, which is a contract, not a
+compatibility claim.
 
 ---
 
