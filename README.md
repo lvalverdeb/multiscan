@@ -152,6 +152,7 @@ cargo xtask gen          # regenerate types from schemas/ (after any schema edit
 cargo test --workspace
 cargo xtask golden       # golden corpus diff
 cargo xtask determinism  # 100-run byte-compare
+cargo xtask bench-detect # detection precision/recall/F1 vs a labeled corpus
 cargo xtask safety       # scope/authorization negative tests
 cargo xtask offline      # sandboxed no-network verification
 cargo clippy --workspace --all-targets -- -D warnings

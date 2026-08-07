@@ -1,0 +1,27 @@
+{
+  "_comment": "Ground truth for the detection benchmark (cargo xtask bench-detect). Every finding the scanner SHOULD report on testdata/corpus/bench/positive, plus the OSV advisories the SCA fixtures resolve against. The quiet corpus (testdata/corpus/quiet) is the false-positive measurement set. Paths are relative to the positive-corpus root. This is a crafted regression/quality gate, not a real-world-scale labeled dataset — see docs.",
+  "osv": {
+    "npm": [
+      {"id":"GHSA-lodash-1","summary":"Prototype pollution in lodash","database_specific":{"severity":"HIGH","cwe_ids":["CWE-1321"]},"affected":[{"package":{"ecosystem":"npm","name":"lodash"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"4.17.21"}]}]}]}
+    ],
+    "PyPI": [
+      {"id":"PYSEC-django-1","summary":"SQL injection in Django","database_specific":{"severity":"HIGH","cwe_ids":["CWE-89"]},"affected":[{"package":{"ecosystem":"PyPI","name":"Django"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"3.2"},{"fixed":"3.2.15"}]}]}]}
+    ]
+  },
+  "expected": [
+    {"engine": "secrets", "key": "aws-access-key-id", "path": "secrets/config.py"},
+    {"engine": "secrets", "key": "database-url-credentials", "path": "secrets/config.py"},
+    {"engine": "secrets", "key": "keyword-context-secret", "path": "secrets/config.py"},
+    {"engine": "secrets", "key": "private-key-block", "path": "secrets/id_rsa"},
+    {"engine": "sca", "key": "GHSA-lodash-1", "path": "deps/package-lock.json"},
+    {"engine": "sca", "key": "PYSEC-django-1", "path": "deps/requirements.txt"},
+    {"engine": "iac", "key": "cis-docker-floating-base-tag", "path": "infra/Dockerfile"},
+    {"engine": "iac", "key": "cis-docker-run-as-root", "path": "infra/Dockerfile"},
+    {"engine": "iac", "key": "cis-docker-secret-in-env", "path": "infra/Dockerfile"},
+    {"engine": "iac", "key": "cis-docker-add-remote-url", "path": "infra/Dockerfile"},
+    {"engine": "iac", "key": "cis-docker-curl-pipe-shell", "path": "infra/Dockerfile"},
+    {"engine": "iac", "key": "cis-aws-s3-public-acl", "path": "infra/main.tf"},
+    {"engine": "iac", "key": "cis-aws-s3-no-encryption", "path": "infra/main.tf"}
+  ],
+  "floors": { "precision": 1.0, "recall": 1.0 }
+}

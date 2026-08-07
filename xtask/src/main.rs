@@ -5,6 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod bench;
+mod bench_detect;
 mod determinism;
 mod gen;
 mod golden;
@@ -48,6 +49,12 @@ enum Cmd {
     Offline,
     /// Performance gates NFR-001..005
     Bench,
+    /// Detection benchmark: precision/recall/F1 vs a committed labeled corpus
+    BenchDetect {
+        /// Fail if metrics fall below the corpus floors (CI gate)
+        #[arg(long)]
+        check: bool,
+    },
     /// No-I/O purity check for core/dedup/risk + lint-inheritance check (spec 5.2)
     Purity,
     /// Full CI ladder: gen --check, fmt, clippy, purity, test, golden,
@@ -63,6 +70,7 @@ fn main() -> Result<()> {
         Cmd::Safety => safety(),
         Cmd::Offline => offline::run(),
         Cmd::Bench => bench::run(),
+        Cmd::BenchDetect { check } => bench_detect::run(check),
         Cmd::Purity => purity::run(),
         Cmd::Ci => ci(),
     }
@@ -115,6 +123,7 @@ fn ci() -> Result<()> {
     util::run("cargo", &["xtask", "safety"])?;
     util::run("cargo", &["xtask", "offline"])?;
     util::run("cargo", &["xtask", "bench"])?;
+    util::run("cargo", &["xtask", "bench-detect", "--check"])?;
     util::run("cargo", &["deny", "check"])?;
     eprintln!("xtask ci: all gates green");
     Ok(())

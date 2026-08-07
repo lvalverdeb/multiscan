@@ -650,6 +650,7 @@ phase_6_polish:
 | Network isolation | `--offline` tests run under a sandbox that fails the test on any syscall to the network (FR-011). |
 | Recall | `testdata/lab/` fixtures and locally-hosted deliberately-vulnerable apps on an isolated network. **Never** point tests at real or third-party hosts. |
 | Signal quality | Per §13.3 FP-006: a benign "quiet corpus" per heuristic detector that MUST yield zero findings. A regression that makes it fire is a build failure, tracked like the golden corpus. |
+| Detection benchmark | `cargo xtask bench-detect` measures precision/recall/F1 per engine against a committed labeled corpus (positive fixtures with a complete label set; the quiet corpus as the false-positive set). `--check` gates on the corpus floors. A crafted regression gate, not a real-world-scale dataset; differential runs against other scanners plug in via the SARIF bridge. |
 | Performance | Benchmark suite gating NFR-001..005 in CI; regressions >15% fail. |
 | Supply chain | `cargo-deny` (licenses, advisories, bans) and `cargo-audit` on every build. We eat our own dog food. |
 
