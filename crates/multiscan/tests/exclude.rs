@@ -7,18 +7,48 @@
 // does not reach them.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::{Command, Output};
+
+use chrono::Utc;
+use multiscan_feeds::{write_snapshot, SnapshotCounts, SnapshotData};
 
 /// A line the entropy detector always fires on (no provider rule matches).
 const ENTROPY_LINE: &str = "token = Zx9Qw3Vb7Nk2Rt5Yu8Pm1Lo4Hf6Gd0Sa\n";
 
 fn multiscan(dir: &Path, args: &[&str]) -> Output {
+    // A fresh empty cache per invocation: inheriting the developer's real
+    // feed cache made these tests pass locally and fail on a clean machine.
+    let cache = tempfile::tempdir().unwrap();
+    multiscan_with_cache(cache.path(), dir, args)
+}
+
+fn multiscan_with_cache(cache: &Path, dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_multiscan"))
+        .env("MULTISCAN_CACHE_DIR", cache)
         .current_dir(dir)
         .args(args)
         .output()
         .expect("binary runs")
+}
+
+/// The sca layer needs a FeedSnapshot present to run at all; SBOM inventory
+/// needs no advisory content, so an empty snapshot keeps the test hermetic.
+fn seed_empty_snapshot(cache: &Path) {
+    let data = SnapshotData {
+        kev_json: br#"{"vulnerabilities":[]}"#.to_vec(),
+        epss_csv: b"cve,epss,percentile\n".to_vec(),
+        osv_jsonl: BTreeMap::new(),
+        rule_packs: BTreeMap::new(),
+        counts: SnapshotCounts {
+            kev: 0,
+            epss: 0,
+            osv: BTreeMap::new(),
+        },
+        sources: BTreeMap::new(),
+    };
+    write_snapshot(cache, &data, Utc::now()).unwrap();
 }
 
 fn finding_paths(out: &Output) -> Vec<String> {
@@ -201,7 +231,10 @@ fn layer_exclude_scopes_to_one_layer() {
     );
 
     // Sca layer: the same file is still discovered — its package reaches the SBOM.
-    let out = multiscan(
+    let cache = tempfile::tempdir().unwrap();
+    seed_empty_snapshot(cache.path());
+    let out = multiscan_with_cache(
+        cache.path(),
         project.path(),
         &[
             "scan",
@@ -236,7 +269,10 @@ fn global_exclude_reaches_sbom_inventory() {
     )
     .unwrap();
 
-    let out = multiscan(
+    let cache = tempfile::tempdir().unwrap();
+    seed_empty_snapshot(cache.path());
+    let out = multiscan_with_cache(
+        cache.path(),
         project.path(),
         &[
             "scan",
