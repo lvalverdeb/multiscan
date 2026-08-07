@@ -1211,7 +1211,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-bridge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "multiscan-core",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1267,7 +1267,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-dedup"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "multiscan-core",
@@ -1277,7 +1277,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "globset",
  "multiscan-core",
@@ -1288,7 +1288,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-feeds"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-iac"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "hcl-rs",
@@ -1321,7 +1321,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-probe"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -1340,7 +1340,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-report"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "multiscan-core",
  "serde_json",
@@ -1348,7 +1348,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-risk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "multiscan-core",
  "serde_json",
@@ -1356,7 +1356,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-sast"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "multiscan-core",
@@ -1365,7 +1365,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-sca"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cap-std",
  "chrono",
@@ -1391,7 +1391,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-scope"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "ed25519-dalek",
@@ -1406,7 +1406,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-secrets"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "multiscan-core",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "multiscan-core",
@@ -2797,7 +2797,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "blake3",
