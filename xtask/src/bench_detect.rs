@@ -80,8 +80,13 @@ pub fn run(check: bool) -> Result<()> {
 
     // Positive corpus: every finding here should correspond to a label.
     let positive = scan(&bench.join("positive"), &cache)?;
-    // Quiet corpus: every finding here is a false positive.
-    let quiet = scan(&root.join("testdata/corpus/quiet"), &cache)?;
+    // Negative corpora: every finding here is a false positive. `quiet` is the
+    // secrets FP-006 set; `bench/negative` adds realistic benign inputs across
+    // engines — notably patched dependency versions that MUST NOT match the
+    // seeded advisories (the FR-003 naive-comparison failure mode) and
+    // correctly-configured IaC.
+    let mut quiet = scan(&root.join("testdata/corpus/quiet"), &cache)?;
+    quiet.extend(scan(&bench.join("negative"), &cache)?);
 
     let expected: BTreeSet<Key> = labels["expected"]
         .as_array()
