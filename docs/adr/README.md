@@ -21,7 +21,7 @@ rewrite.
 | [0010](0010-rule-pack-distribution.md) | Rule-pack distribution through the feed channel | Accepted | Extends §7.2/§10 (secrets, IaC, probe packs) |
 | [0011](0011-history-flag-amends-sec-104.md) | Amend SEC-104 — `--history` over all reachable objects | Accepted | **Amends** SEC-104 (§7.2) |
 | [0012](0012-canonical-vulnerability-identity.md) | Canonical vulnerability identity — merge advisory records by CVE | Accepted | **Amends** §7.7.2 identity tuples |
-| [0013](0013-phase2-initial-language-set.md) | Phase-2 initial language set — Python and JS/TS | Proposed | Extends `docs/phase-2.md`; resolves Q-08, narrows Q-07/Q-09 |
+| [0013](0013-phase2-initial-language-set.md) | Phase-2 initial language set — Python and JS/TS | Accepted | Extends `docs/phase-2.md`; resolves Q-08, narrows Q-07/Q-09 |
 
 ## Conventions
 

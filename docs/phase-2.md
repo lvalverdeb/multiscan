@@ -165,7 +165,7 @@ The API path is a feed fetch, not a scan-target request — it belongs on the al
 | ID | Question | Conservative default (R-7) |
 |---|---|---|
 | Q-07 | tree-sitter (C, `unsafe`, large grammars) vs a pure-Rust parsing layer? | Narrowed by ADR 0013: pure-Rust parser families evaluated first against an explicit gate; tree-sitter only via its own stop-and-ask ADR. |
-| Q-08 | Which languages first? | **Resolved by ADR 0013 (proposed): Python and JavaScript/TypeScript.** |
+| Q-08 | Which languages first? | **Resolved by ADR 0013: Python and JavaScript/TypeScript.** |
 | Q-09 | Do grammars ship in the binary or as downloadable packs? | Per ADR 0013: in-binary at two languages; `T-702` PR states the size delta against `NFR-004`. |
 | Q-10 | Where does advisory symbol data for reachability come from? | OSV where present; `Unknown` otherwise. Do not author symbol lists — that is authoring vulnerability knowledge, which §1.2 forbids. ADR 0013 defers symbol-level reachability until a symbol-rich ecosystem (Go, Rust) joins the set; workstream B starts at module granularity. |
 

@@ -1,6 +1,6 @@
 # ADR 0013: Phase-2 initial language set — Python and JavaScript/TypeScript
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-07
 - Extends: `docs/phase-2.md` (informative sketch); resolves its Q-08, narrows
   Q-07 and Q-09, and amends the `T-801` dependency. Binds nothing in
