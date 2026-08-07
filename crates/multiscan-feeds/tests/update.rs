@@ -222,5 +222,9 @@ fn update_fetches_rules_pack_into_snapshot() {
         .rule_pack("secrets")
         .expect("snapshot carries the rules pack")
         .expect("digest verifies");
-    assert_eq!(pack, PACK.as_bytes(), "pack bytes round-trip through the snapshot");
+    assert_eq!(
+        pack,
+        PACK.as_bytes(),
+        "pack bytes round-trip through the snapshot"
+    );
 }

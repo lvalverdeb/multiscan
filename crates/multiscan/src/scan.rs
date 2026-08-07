@@ -34,7 +34,10 @@ fn usage(message: &str) -> Exit {
 /// read from the root only; a missing file contributes nothing. The
 /// `.multiscanignore` rules come last so they can re-include (`!`) something
 /// `.gitignore` excluded.
-fn load_ignore_files(root: &std::path::Path, respect_gitignore: bool) -> multiscan_engine::IgnoreSet {
+fn load_ignore_files(
+    root: &std::path::Path,
+    respect_gitignore: bool,
+) -> multiscan_engine::IgnoreSet {
     let mut text = String::new();
     if respect_gitignore {
         if let Ok(gitignore) = std::fs::read_to_string(root.join(".gitignore")) {
@@ -69,22 +72,22 @@ fn resolve_secrets_pack(
         .as_ref()
         .and_then(|cache| multiscan_feeds::current_snapshot(cache).ok().flatten())
         .and_then(|snapshot| match snapshot.rule_pack("secrets") {
-            Some(Ok(bytes)) => {
-                match multiscan_secrets::parse_pack(&bytes) {
-                    Ok(pack) => Some(pack),
-                    Err(err) => {
-                        if !quiet {
-                            eprintln!(
-                                "multiscan: warning: feed secrets pack invalid, using embedded: {err}"
-                            );
-                        }
-                        None
+            Some(Ok(bytes)) => match multiscan_secrets::parse_pack(&bytes) {
+                Ok(pack) => Some(pack),
+                Err(err) => {
+                    if !quiet {
+                        eprintln!(
+                            "multiscan: warning: feed secrets pack invalid, using embedded: {err}"
+                        );
                     }
+                    None
                 }
-            }
+            },
             Some(Err(err)) => {
                 if !quiet {
-                    eprintln!("multiscan: warning: feed secrets pack unreadable, using embedded: {err}");
+                    eprintln!(
+                        "multiscan: warning: feed secrets pack unreadable, using embedded: {err}"
+                    );
                 }
                 None
             }
@@ -149,14 +152,18 @@ fn resolve_iac_engine(
                 Ok(engine) => Some(engine),
                 Err(err) => {
                     if !quiet {
-                        eprintln!("multiscan: warning: feed iac pack invalid, using embedded: {err}");
+                        eprintln!(
+                            "multiscan: warning: feed iac pack invalid, using embedded: {err}"
+                        );
                     }
                     None
                 }
             },
             Some(Err(err)) => {
                 if !quiet {
-                    eprintln!("multiscan: warning: feed iac pack unreadable, using embedded: {err}");
+                    eprintln!(
+                        "multiscan: warning: feed iac pack unreadable, using embedded: {err}"
+                    );
                 }
                 None
             }
@@ -184,8 +191,15 @@ fn resolve_iac_engine(
     };
 
     if verbose && !quiet {
-        let source = if from_feed { "feed snapshot" } else { "embedded" };
-        eprintln!("multiscan: iac policy pack {} ({source})", engine.pack_ref());
+        let source = if from_feed {
+            "feed snapshot"
+        } else {
+            "embedded"
+        };
+        eprintln!(
+            "multiscan: iac policy pack {} ({source})",
+            engine.pack_ref()
+        );
     }
     engine
 }
@@ -963,7 +977,12 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         registry.register(Box::new(multiscan_secrets::SecretsEngine::with_pack(pack)));
     }
     if ctx.layers.contains(&Layer::Iac) {
-        registry.register(Box::new(resolve_iac_engine(&ctx, &config, args.quiet, args.verbose)));
+        registry.register(Box::new(resolve_iac_engine(
+            &ctx,
+            &config,
+            args.quiet,
+            args.verbose,
+        )));
     }
     if ctx.layers.contains(&Layer::Sast) {
         // v1 scaffold: registered but always NotApplicable (NG-2).

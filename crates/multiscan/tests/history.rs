@@ -51,7 +51,16 @@ fn repo_with_rotated_secret() -> tempfile::TempDir {
 fn scan(project: &Path, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_multiscan"))
         .current_dir(project)
-        .args(["scan", ".", "--layers", "secrets", "--offline", "--no-store", "--format", "json"])
+        .args([
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--no-store",
+            "--format",
+            "json",
+        ])
         .args(extra)
         .output()
         .expect("binary runs")
@@ -71,9 +80,17 @@ fn history_finds_rotated_secret() {
     );
 
     let out = scan(repo.path(), &["--history"]);
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(!stdout.contains(AWS_KEY_ID), "secret value leaked (SEC-101)");
+    assert!(
+        !stdout.contains(AWS_KEY_ID),
+        "secret value leaked (SEC-101)"
+    );
     let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let arr = findings.as_array().unwrap();
     let hit = arr

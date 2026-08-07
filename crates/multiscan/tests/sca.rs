@@ -210,7 +210,11 @@ dependencies = [
     let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
     assert_eq!(out.status.code(), Some(0));
     let findings = findings.as_array().unwrap();
-    assert_eq!(findings.len(), 1, "expected the Django advisory: {findings:?}");
+    assert_eq!(
+        findings.len(),
+        1,
+        "expected the Django advisory: {findings:?}"
+    );
     let f = &findings[0];
     assert_eq!(f["identity"]["advisory_id"], "PYSEC-2022-1");
     assert_eq!(f["remediation"]["fixed_version"], "3.2.15");

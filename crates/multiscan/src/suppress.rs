@@ -78,7 +78,10 @@ pub fn compile(entries: &[SuppressEntry]) -> Result<Vec<CompiledSuppression>, St
             Some(pattern) => Some(
                 Glob::new(pattern)
                     .map_err(|err| {
-                        format!("[[suppress]] #{}: invalid path glob `{pattern}`: {err}", i + 1)
+                        format!(
+                            "[[suppress]] #{}: invalid path glob `{pattern}`: {err}",
+                            i + 1
+                        )
                     })?
                     .compile_matcher(),
             ),

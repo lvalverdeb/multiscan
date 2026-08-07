@@ -198,7 +198,9 @@ pub fn write_snapshot(
     }
     for (name, pack) in &data.rule_packs {
         if name.contains(['/', '\\']) || name.contains("..") {
-            return Err(FeedError::Corrupt(format!("invalid rule pack name `{name}`")));
+            return Err(FeedError::Corrupt(format!(
+                "invalid rule pack name `{name}`"
+            )));
         }
         files.insert(format!("rules/{name}.json"), pack);
     }

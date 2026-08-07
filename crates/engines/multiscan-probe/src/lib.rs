@@ -61,7 +61,10 @@ mod tests {
         for t in &templates {
             assert!(ids.insert(t.id.clone()), "duplicate template id {}", t.id);
             assert!(
-                matches!(t.severity.as_str(), "critical" | "high" | "medium" | "low" | "info"),
+                matches!(
+                    t.severity.as_str(),
+                    "critical" | "high" | "medium" | "low" | "info"
+                ),
                 "{}: bad severity {}",
                 t.id,
                 t.severity
@@ -90,8 +93,13 @@ mod tests {
                 let has_content = r.matchers.iter().any(|m| {
                     matches!(
                         m,
-                        Matcher::Regex { part: Part::Body, .. }
-                            | Matcher::Word { part: Part::Body, .. }
+                        Matcher::Regex {
+                            part: Part::Body,
+                            ..
+                        } | Matcher::Word {
+                            part: Part::Body,
+                            ..
+                        }
                     )
                 });
                 assert!(
@@ -110,25 +118,60 @@ mod tests {
     #[test]
     fn corpus_matches_positives_not_negatives() {
         let templates = builtin_templates().unwrap();
-        let req_of =
-            |id: &str| templates.iter().find(|t| t.id == id).unwrap().requests[0].clone();
+        let req_of = |id: &str| templates.iter().find(|t| t.id == id).unwrap().requests[0].clone();
 
         // (template id, matching body, non-matching body)
         let cases = [
             ("exposed-env-file", "DB_SECRET=hunter2\n", "<html>ok</html>"),
-            ("exposed-npmrc", "//registry.npmjs.org/:_authToken=abc", "registry=https://x"),
-            ("exposed-aws-credentials", "[default]\naws_access_key_id = AKIA", "nothing here"),
-            ("exposed-ssh-private-key", "-----BEGIN OPENSSH PRIVATE KEY-----", "ssh-rsa AAAA"),
-            ("exposed-wp-config-backup", "define('DB_PASSWORD', 'x');", "<?php echo 1;"),
-            ("exposed-sql-dump", "INSERT INTO users VALUES (1);", "not a dump"),
-            ("exposed-git-config", "[core]\n\trepositoryformatversion = 0", "hello"),
+            (
+                "exposed-npmrc",
+                "//registry.npmjs.org/:_authToken=abc",
+                "registry=https://x",
+            ),
+            (
+                "exposed-aws-credentials",
+                "[default]\naws_access_key_id = AKIA",
+                "nothing here",
+            ),
+            (
+                "exposed-ssh-private-key",
+                "-----BEGIN OPENSSH PRIVATE KEY-----",
+                "ssh-rsa AAAA",
+            ),
+            (
+                "exposed-wp-config-backup",
+                "define('DB_PASSWORD', 'x');",
+                "<?php echo 1;",
+            ),
+            (
+                "exposed-sql-dump",
+                "INSERT INTO users VALUES (1);",
+                "not a dump",
+            ),
+            (
+                "exposed-git-config",
+                "[core]\n\trepositoryformatversion = 0",
+                "hello",
+            ),
             ("exposed-git-head", "ref: refs/heads/main\n", "just text"),
             ("exposed-svn", "SQLite format 3\u{0}", "plain"),
             ("exposed-ds-store", "Bud1\u{0}\u{0}", "text"),
-            ("phpinfo-exposed", "<title>PHP Version 8.2.1</title>", "<html></html>"),
-            ("apache-server-status", "<h1>Apache Server Status for x</h1>", "welcome"),
+            (
+                "phpinfo-exposed",
+                "<title>PHP Version 8.2.1</title>",
+                "<html></html>",
+            ),
+            (
+                "apache-server-status",
+                "<h1>Apache Server Status for x</h1>",
+                "welcome",
+            ),
             ("nginx-status", "Active connections: 43", "welcome"),
-            ("spring-actuator-env", "{\"propertySources\":[]}", "{\"status\":\"UP\"}"),
+            (
+                "spring-actuator-env",
+                "{\"propertySources\":[]}",
+                "{\"status\":\"UP\"}",
+            ),
         ];
         assert_eq!(cases.len(), 14, "cover every template");
 

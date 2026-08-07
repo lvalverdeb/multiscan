@@ -218,9 +218,7 @@ fn render(
     for f in fp_detail {
         println!("  UNEXPECTED  {}/{} @ {}", f.engine, f.key, f.path);
     }
-    println!(
-        "\n  Note: a crafted regression gate, not a real-world-scale dataset.\n"
-    );
+    println!("\n  Note: a crafted regression gate, not a real-world-scale dataset.\n");
 }
 
 /// Scan `path` with all local layers, offline, against the seeded cache, and

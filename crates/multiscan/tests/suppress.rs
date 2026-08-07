@@ -13,7 +13,14 @@ const AWS_KEY_ID: &str = "AKIAIOSFODNN7EXAMPLE";
 fn scan(project: &Path, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_multiscan"))
         .current_dir(project)
-        .args(["scan", ".", "--layers", "secrets", "--offline", "--no-store"])
+        .args([
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--no-store",
+        ])
         .args(extra)
         .output()
         .expect("binary runs")
@@ -35,7 +42,11 @@ fn rule_and_path_suppression_scopes_the_gate() {
         format!("KEY={AWS_KEY_ID}\n"),
     )
     .unwrap();
-    std::fs::write(project.path().join("app.env"), format!("KEY={AWS_KEY_ID}\n")).unwrap();
+    std::fs::write(
+        project.path().join("app.env"),
+        format!("KEY={AWS_KEY_ID}\n"),
+    )
+    .unwrap();
 
     // No suppression: the AWS key is high → gate fails.
     let out = scan(project.path(), &["--fail-on", "high"]);
@@ -72,7 +83,11 @@ fn rule_and_path_suppression_scopes_the_gate() {
          justification = \"test fixtures\"\napprover = \"sec-team\"\nexpires = \"2099-01-01\"\n",
     );
     let out = scan(project.path(), &["--fail-on", "high"]);
-    assert_eq!(out.status.code(), Some(0), "both keys suppressed → clean gate");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "both keys suppressed → clean gate"
+    );
 }
 
 /// An expired scoped suppression does not apply — the finding gates normally
@@ -80,14 +95,22 @@ fn rule_and_path_suppression_scopes_the_gate() {
 #[test]
 fn expired_scoped_suppression_reappears() {
     let project = tempfile::tempdir().unwrap();
-    std::fs::write(project.path().join("app.env"), format!("KEY={AWS_KEY_ID}\n")).unwrap();
+    std::fs::write(
+        project.path().join("app.env"),
+        format!("KEY={AWS_KEY_ID}\n"),
+    )
+    .unwrap();
     write_config(
         project.path(),
         "[[suppress]]\nrule_id = \"aws-access-key-id\"\npath = \"**\"\n\
          justification = \"temporary\"\napprover = \"sec\"\nexpires = \"2000-01-01\"\n",
     );
     let out = scan(project.path(), &["--fail-on", "high"]);
-    assert_eq!(out.status.code(), Some(1), "expired suppression must not apply");
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "expired suppression must not apply"
+    );
 }
 
 /// A `[[suppress]]` entry with no selector is a config error (exit 2).
@@ -126,5 +149,9 @@ fn missing_mandatory_field_still_errors() {
         "[[suppress]]\nrule_id = \"aws-access-key-id\"\njustification = \"x\"\nexpires = \"2099-01-01\"\n",
     );
     let out = scan(project.path(), &[]);
-    assert_eq!(out.status.code(), Some(2), "approver is mandatory (CLI-006)");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "approver is mandatory (CLI-006)"
+    );
 }

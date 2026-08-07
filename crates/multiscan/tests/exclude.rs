@@ -45,11 +45,26 @@ fn global_exclude_skips_matched_files() {
 
     let out = multiscan(
         project.path(),
-        &["scan", ".", "--layers", "secrets", "--offline", "--format", "json", "--no-store"],
+        &[
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--format",
+            "json",
+            "--no-store",
+        ],
     );
     let paths = finding_paths(&out);
-    assert!(paths.contains(&"kept.txt".to_string()), "kept.txt must still be scanned");
-    assert!(!paths.contains(&"skipped.txt".to_string()), "skipped.txt was excluded");
+    assert!(
+        paths.contains(&"kept.txt".to_string()),
+        "kept.txt must still be scanned"
+    );
+    assert!(
+        !paths.contains(&"skipped.txt".to_string()),
+        "skipped.txt was excluded"
+    );
 }
 
 /// A pattern matching a directory path prunes everything beneath it.
@@ -67,7 +82,16 @@ fn directory_exclude_prunes_subtree() {
 
     let out = multiscan(
         project.path(),
-        &["scan", ".", "--layers", "secrets", "--offline", "--format", "json", "--no-store"],
+        &[
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--format",
+            "json",
+            "--no-store",
+        ],
     );
     let paths = finding_paths(&out);
     assert!(paths.contains(&"src.txt".to_string()));
@@ -84,8 +108,16 @@ fn exclude_flag_without_config() {
     let out = multiscan(
         project.path(),
         &[
-            "scan", ".", "--layers", "secrets", "--offline", "--format", "json", "--no-store",
-            "--exclude", "skipped.txt",
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--format",
+            "json",
+            "--no-store",
+            "--exclude",
+            "skipped.txt",
         ],
     );
     let paths = finding_paths(&out);
@@ -109,13 +141,27 @@ fn exclude_flag_overrides_file_global_list() {
     let out = multiscan(
         project.path(),
         &[
-            "scan", ".", "--layers", "secrets", "--offline", "--format", "json", "--no-store",
-            "--exclude", "b.txt",
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--format",
+            "json",
+            "--no-store",
+            "--exclude",
+            "b.txt",
         ],
     );
     let paths = finding_paths(&out);
-    assert!(paths.contains(&"a.txt".to_string()), "file exclude replaced by flag");
-    assert!(!paths.contains(&"b.txt".to_string()), "flag exclude applies");
+    assert!(
+        paths.contains(&"a.txt".to_string()),
+        "file exclude replaced by flag"
+    );
+    assert!(
+        !paths.contains(&"b.txt".to_string()),
+        "flag exclude applies"
+    );
 }
 
 /// ADR 0004: `[scan.secrets] exclude` hides a lockfile from the secrets layer
@@ -138,14 +184,35 @@ fn layer_exclude_scopes_to_one_layer() {
     // Secrets layer: the file is excluded, no findings from it.
     let out = multiscan(
         project.path(),
-        &["scan", ".", "--layers", "secrets", "--offline", "--format", "json", "--no-store"],
+        &[
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--format",
+            "json",
+            "--no-store",
+        ],
     );
-    assert!(finding_paths(&out).is_empty(), "secrets must not scan the excluded lockfile");
+    assert!(
+        finding_paths(&out).is_empty(),
+        "secrets must not scan the excluded lockfile"
+    );
 
     // Sca layer: the same file is still discovered — its package reaches the SBOM.
     let out = multiscan(
         project.path(),
-        &["scan", ".", "--layers", "sca", "--offline", "--format", "sbom", "--no-store"],
+        &[
+            "scan",
+            ".",
+            "--layers",
+            "sca",
+            "--offline",
+            "--format",
+            "sbom",
+            "--no-store",
+        ],
     );
     let sbom = String::from_utf8_lossy(&out.stdout);
     assert!(
@@ -158,7 +225,11 @@ fn layer_exclude_scopes_to_one_layer() {
 #[test]
 fn global_exclude_reaches_sbom_inventory() {
     let project = tempfile::tempdir().unwrap();
-    std::fs::write(project.path().join("requirements.txt"), "requests==2.31.0\n").unwrap();
+    std::fs::write(
+        project.path().join("requirements.txt"),
+        "requests==2.31.0\n",
+    )
+    .unwrap();
     std::fs::write(
         project.path().join("multiscan.toml"),
         "[scan]\nexclude = [\"requirements.txt\"]\n",
@@ -167,10 +238,22 @@ fn global_exclude_reaches_sbom_inventory() {
 
     let out = multiscan(
         project.path(),
-        &["scan", ".", "--layers", "sca", "--offline", "--format", "sbom", "--no-store"],
+        &[
+            "scan",
+            ".",
+            "--layers",
+            "sca",
+            "--offline",
+            "--format",
+            "sbom",
+            "--no-store",
+        ],
     );
     let sbom = String::from_utf8_lossy(&out.stdout);
-    assert!(!sbom.contains("requests"), "globally excluded lockfile leaked into sbom");
+    assert!(
+        !sbom.contains("requests"),
+        "globally excluded lockfile leaked into sbom"
+    );
 }
 
 /// An invalid glob is a config error: exit 2, named pattern and section.
@@ -186,7 +269,10 @@ fn invalid_glob_in_config_is_usage_error() {
     let out = multiscan(project.path(), &["scan", ".", "--offline", "--no-store"]);
     assert_eq!(out.status.code().unwrap(), 2);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("a{b") && stderr.contains("[scan]"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("a{b") && stderr.contains("[scan]"),
+        "stderr: {stderr}"
+    );
 }
 
 /// Same for a bad pattern given via the flag.

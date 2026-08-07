@@ -704,8 +704,14 @@ mod tests {
         let mut findings = flood(FLOOD_THRESHOLD, "high-entropy-string", "uv.lock");
         sort_findings(&mut findings);
         let table = render(Format::Table, &findings, &footer());
-        assert!(!table.contains('×'), "must not collapse ≤ threshold: {table}");
-        assert_eq!(table.matches("high-entropy-string").count(), FLOOD_THRESHOLD);
+        assert!(
+            !table.contains('×'),
+            "must not collapse ≤ threshold: {table}"
+        );
+        assert_eq!(
+            table.matches("high-entropy-string").count(),
+            FLOOD_THRESHOLD
+        );
     }
 
     #[test]
@@ -729,7 +735,10 @@ mod tests {
         sort_findings(&mut findings);
 
         let table = render(Format::Table, &findings, &footer());
-        assert!(table.contains("aws-access-key-id"), "real finding hidden: {table}");
+        assert!(
+            table.contains("aws-access-key-id"),
+            "real finding hidden: {table}"
+        );
         assert!(table.contains("config.py:3"));
     }
 

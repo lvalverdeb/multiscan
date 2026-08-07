@@ -255,7 +255,11 @@ fn parse_uv_lock(text: &str) -> Result<Vec<ResolvedPackage>, String> {
     // Direct = declared by any workspace-local package, in its runtime,
     // dev-group, or extras lists (best-effort; drives evidence only).
     let mut direct_names = std::collections::BTreeSet::new();
-    for package in lock.package.iter().filter(|p| uv_source_is_local(&p.source)) {
+    for package in lock
+        .package
+        .iter()
+        .filter(|p| uv_source_is_local(&p.source))
+    {
         let groups = package
             .dev_dependencies
             .values()
@@ -392,8 +396,7 @@ fn pnpm_key_parts(key: &str) -> Option<(String, String)> {
     let at = key.rfind('@').filter(|&i| i > 0)?;
     let (name, version) = (&key[..at], &key[at + 1..]);
     let version = version.split('_').next().unwrap_or(version);
-    (!name.is_empty() && !version.is_empty())
-        .then(|| (name.to_string(), version.to_string()))
+    (!name.is_empty() && !version.is_empty()).then(|| (name.to_string(), version.to_string()))
 }
 
 fn parse_pnpm_lock(text: &str) -> Result<Vec<ResolvedPackage>, String> {
@@ -706,10 +709,7 @@ fn parse_pom_xml(text: &str) -> Result<Vec<ResolvedPackage>, String> {
         // a range (`[1.0,2.0)`), or an absent version (managed elsewhere) is
         // unpinned — surfaced as SCA-001, never silently dropped.
         let version = xml_first(block, "version").filter(|v| {
-            !v.is_empty()
-                && !v.contains('$')
-                && !v.starts_with('[')
-                && !v.starts_with('(')
+            !v.is_empty() && !v.contains('$') && !v.starts_with('[') && !v.starts_with('(')
         });
         out.push(ResolvedPackage {
             ecosystem: "Maven".to_string(),
@@ -824,16 +824,13 @@ fn parse_pyproject(text: &str) -> Result<Vec<ResolvedPackage>, String> {
 
     // PEP 621: [project] dependencies + [project.optional-dependencies].
     if let Some(project) = doc.get("project") {
-        let groups = project
-            .get("dependencies")
-            .into_iter()
-            .chain(
-                project
-                    .get("optional-dependencies")
-                    .and_then(|t| t.as_table())
-                    .into_iter()
-                    .flat_map(|t| t.values()),
-            );
+        let groups = project.get("dependencies").into_iter().chain(
+            project
+                .get("optional-dependencies")
+                .and_then(|t| t.as_table())
+                .into_iter()
+                .flat_map(|t| t.values()),
+        );
         for group in groups {
             for spec in group.as_array().into_iter().flatten() {
                 if let Some(pkg) = spec.as_str().and_then(pep508_package) {
@@ -852,7 +849,9 @@ fn parse_pyproject(text: &str) -> Result<Vec<ResolvedPackage>, String> {
             .flat_map(|groups| groups.values())
             .filter_map(|g| g.get("dependencies"));
         for table in poetry.get("dependencies").into_iter().chain(group_tables) {
-            let Some(table) = table.as_table() else { continue };
+            let Some(table) = table.as_table() else {
+                continue;
+            };
             for (name, constraint) in table {
                 if name == "python" {
                     continue;
@@ -864,7 +863,9 @@ fn parse_pyproject(text: &str) -> Result<Vec<ResolvedPackage>, String> {
                         if t.contains_key("path") || t.contains_key("git") {
                             continue;
                         }
-                        t.get("version").and_then(|v| v.as_str()).and_then(poetry_exact)
+                        t.get("version")
+                            .and_then(|v| v.as_str())
+                            .and_then(poetry_exact)
                     }
                     _ => None,
                 };
@@ -943,7 +944,10 @@ fn parse_gemfile(text: &str) -> Result<Vec<ResolvedPackage>, String> {
     let mut out = Vec::new();
     for line in text.lines() {
         let line = line.split('#').next().unwrap_or("").trim();
-        let Some(rest) = line.strip_prefix("gem ").or_else(|| line.strip_prefix("gem(")) else {
+        let Some(rest) = line
+            .strip_prefix("gem ")
+            .or_else(|| line.strip_prefix("gem("))
+        else {
             continue;
         };
         // path:/git:/github: gems are not registry-resolvable.
@@ -993,7 +997,13 @@ fn parse_composer_json(text: &str) -> Result<Vec<ResolvedPackage>, String> {
         let version = (v.chars().next().is_some_and(|c| c.is_ascii_digit())
             && v.chars().all(|c| c.is_ascii_digit() || c == '.'))
         .then(|| v.to_string());
-        out.push(manifest_package("Packagist", "composer", name, version, true));
+        out.push(manifest_package(
+            "Packagist",
+            "composer",
+            name,
+            version,
+            true,
+        ));
     }
     Ok(out)
 }
@@ -1168,7 +1178,9 @@ source = { registry = "https://pypi.org/simple" }
         let pkgs = parse_uv_lock(text).unwrap();
         // Local packages (virtual root, editable member) are not inventoried.
         assert_eq!(pkgs.len(), 3);
-        assert!(!pkgs.iter().any(|p| p.name == "my-app" || p.name == "my-lib"));
+        assert!(!pkgs
+            .iter()
+            .any(|p| p.name == "my-app" || p.name == "my-lib"));
 
         let requests = pkgs.iter().find(|p| p.name == "requests").unwrap();
         assert_eq!(requests.purl(), "pkg:pypi/requests@2.31.0");
@@ -1357,8 +1369,18 @@ DEPENDENCIES
         assert_eq!(lodash.version.as_deref(), Some("4.17.20"));
         assert!(lodash.direct);
         // Ranges are recorded unpinned (SCA-001), never dropped.
-        assert!(pkgs.iter().find(|p| p.name == "react").unwrap().version.is_none());
-        assert!(pkgs.iter().find(|p| p.name == "jest").unwrap().version.is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "react")
+            .unwrap()
+            .version
+            .is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "jest")
+            .unwrap()
+            .version
+            .is_none());
     }
 
     #[test]
@@ -1376,19 +1398,41 @@ mylib = { path = "../mylib" }
         let pkgs = parse_pyproject(text).unwrap();
         assert!(pkgs.iter().all(|p| p.name != "python" && p.name != "mylib"));
         assert_eq!(
-            pkgs.iter().find(|p| p.name == "flask").unwrap().version.as_deref(),
+            pkgs.iter()
+                .find(|p| p.name == "flask")
+                .unwrap()
+                .version
+                .as_deref(),
             Some("2.3.2")
         );
         assert_eq!(
-            pkgs.iter().find(|p| p.name == "uvicorn").unwrap().version.as_deref(),
+            pkgs.iter()
+                .find(|p| p.name == "uvicorn")
+                .unwrap()
+                .version
+                .as_deref(),
             Some("0.23.1")
         );
-        assert!(pkgs.iter().find(|p| p.name == "requests").unwrap().version.is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap()
+            .version
+            .is_none());
         assert_eq!(
-            pkgs.iter().find(|p| p.name == "django").unwrap().version.as_deref(),
+            pkgs.iter()
+                .find(|p| p.name == "django")
+                .unwrap()
+                .version
+                .as_deref(),
             Some("4.2.3")
         );
-        assert!(pkgs.iter().find(|p| p.name == "celery").unwrap().version.is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "celery")
+            .unwrap()
+            .version
+            .is_none());
     }
 
     #[test]
@@ -1411,11 +1455,25 @@ replace (
 ";
         let pkgs = parse_go_mod(text).unwrap();
         assert_eq!(pkgs.len(), 3, "replace block must not contribute");
-        let gin = pkgs.iter().find(|p| p.name == "github.com/gin-gonic/gin").unwrap();
+        let gin = pkgs
+            .iter()
+            .find(|p| p.name == "github.com/gin-gonic/gin")
+            .unwrap();
         assert_eq!(gin.version.as_deref(), Some("1.9.0"));
         assert!(gin.direct);
-        assert!(!pkgs.iter().find(|p| p.name == "golang.org/x/text").unwrap().direct);
-        assert!(pkgs.iter().find(|p| p.name == "github.com/single/dep").unwrap().direct);
+        assert!(
+            !pkgs
+                .iter()
+                .find(|p| p.name == "golang.org/x/text")
+                .unwrap()
+                .direct
+        );
+        assert!(
+            pkgs.iter()
+                .find(|p| p.name == "github.com/single/dep")
+                .unwrap()
+                .direct
+        );
     }
 
     #[test]
@@ -1431,11 +1489,25 @@ gem 'unconstrained'
         let pkgs = parse_gemfile(text).unwrap();
         assert_eq!(pkgs.len(), 3, "path: gem skipped");
         assert_eq!(
-            pkgs.iter().find(|p| p.name == "rails").unwrap().version.as_deref(),
+            pkgs.iter()
+                .find(|p| p.name == "rails")
+                .unwrap()
+                .version
+                .as_deref(),
             Some("7.0.4")
         );
-        assert!(pkgs.iter().find(|p| p.name == "nokogiri").unwrap().version.is_none());
-        assert!(pkgs.iter().find(|p| p.name == "unconstrained").unwrap().version.is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "nokogiri")
+            .unwrap()
+            .version
+            .is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "unconstrained")
+            .unwrap()
+            .version
+            .is_none());
     }
 
     #[test]
@@ -1447,10 +1519,19 @@ gem 'unconstrained'
         let pkgs = parse_composer_json(text).unwrap();
         assert_eq!(pkgs.len(), 2, "platform requirements skipped");
         assert_eq!(
-            pkgs.iter().find(|p| p.name == "monolog/monolog").unwrap().version.as_deref(),
+            pkgs.iter()
+                .find(|p| p.name == "monolog/monolog")
+                .unwrap()
+                .version
+                .as_deref(),
             Some("2.8.0")
         );
-        assert!(pkgs.iter().find(|p| p.name == "phpunit/phpunit").unwrap().version.is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "phpunit/phpunit")
+            .unwrap()
+            .version
+            .is_none());
     }
 
     #[test]
@@ -1469,13 +1550,26 @@ proptest = "1"
         let pkgs = parse_cargo_manifest(text).unwrap();
         assert_eq!(pkgs.len(), 4, "path/workspace deps skipped");
         // Bare versions are caret ranges in cargo — unpinned.
-        assert!(pkgs.iter().find(|p| p.name == "serde").unwrap().version.is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "serde")
+            .unwrap()
+            .version
+            .is_none());
         assert_eq!(
-            pkgs.iter().find(|p| p.name == "exact").unwrap().version.as_deref(),
+            pkgs.iter()
+                .find(|p| p.name == "exact")
+                .unwrap()
+                .version
+                .as_deref(),
             Some("2.1.0")
         );
         assert_eq!(
-            pkgs.iter().find(|p| p.name == "real-name").unwrap().version.as_deref(),
+            pkgs.iter()
+                .find(|p| p.name == "real-name")
+                .unwrap()
+                .version
+                .as_deref(),
             Some("3.0.0")
         );
     }
@@ -1533,7 +1627,12 @@ empty=annotationProcessor
             .unwrap();
         assert_eq!(jackson.version.as_deref(), Some("2.12.1"));
         // Property reference and absent version are unpinned (SCA-001).
-        assert!(pkgs.iter().find(|p| p.name == "org.slf4j:slf4j-api").unwrap().version.is_none());
+        assert!(pkgs
+            .iter()
+            .find(|p| p.name == "org.slf4j:slf4j-api")
+            .unwrap()
+            .version
+            .is_none());
         assert!(pkgs
             .iter()
             .find(|p| p.name == "org.apache.commons:commons-lang3")
@@ -1560,7 +1659,14 @@ empty=annotationProcessor
 
     #[test]
     fn shadowing_map_is_complete() {
-        for manifest in ["package.json", "pyproject.toml", "go.mod", "Gemfile", "composer.json", "Cargo.toml"] {
+        for manifest in [
+            "package.json",
+            "pyproject.toml",
+            "go.mod",
+            "Gemfile",
+            "composer.json",
+            "Cargo.toml",
+        ] {
             assert!(is_manifest(manifest));
             assert!(!shadowing_lockfiles(manifest).is_empty());
             // Every shadow is itself a supported lockfile.

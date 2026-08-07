@@ -19,8 +19,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Instant;
 
-pub use multiscan_core::{EngineManifest, Layer, Profile, RawFinding};
 pub use ignorefile::IgnoreSet;
+pub use multiscan_core::{EngineManifest, Layer, Profile, RawFinding};
 pub use pathfilter::{PathFilter, PathFilterError};
 pub use registry::{EngineRun, Registry};
 

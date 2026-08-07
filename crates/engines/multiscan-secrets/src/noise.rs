@@ -86,9 +86,13 @@ pub fn in_url_context(line: &str, token_start: usize) -> bool {
         return false;
     };
     // Any of these between the scheme and the token means the URL ended.
-    !prefix[scheme_at + 3..]
-        .chars()
-        .any(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}'))
+    !prefix[scheme_at + 3..].chars().any(|c| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '"' | '\'' | '`' | '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}'
+            )
+    })
 }
 
 #[cfg(test)]

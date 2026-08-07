@@ -11,7 +11,16 @@ const AWS_KEY_ID: &str = "AKIAIOSFODNN7EXAMPLE";
 fn paths_scanned(project: &Path) -> Vec<String> {
     let out = Command::new(env!("CARGO_BIN_EXE_multiscan"))
         .current_dir(project)
-        .args(["scan", ".", "--layers", "secrets", "--offline", "--no-store", "--format", "json"])
+        .args([
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--no-store",
+            "--format",
+            "json",
+        ])
         .output()
         .expect("binary runs");
     let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -78,7 +87,11 @@ fn gitignore_is_off_by_default_and_opt_in() {
 fn multiscanignore_negation_reincludes_over_gitignore() {
     let project = tempfile::tempdir().unwrap();
     std::fs::write(project.path().join(".gitignore"), "*.env\n").unwrap();
-    std::fs::write(project.path().join("secret.env"), format!("K={AWS_KEY_ID}\n")).unwrap();
+    std::fs::write(
+        project.path().join("secret.env"),
+        format!("K={AWS_KEY_ID}\n"),
+    )
+    .unwrap();
     std::fs::write(project.path().join(".multiscanignore"), "!secret.env\n").unwrap();
     std::fs::write(
         project.path().join("multiscan.toml"),

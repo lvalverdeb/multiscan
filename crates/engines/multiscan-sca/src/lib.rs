@@ -118,9 +118,7 @@ fn rel_parent(rel: &str) -> &str {
 /// (workspace roots hold the lock for member manifests — Cargo, Go), the
 /// lockfile's exact resolutions win and the manifest is skipped. A repo is
 /// never double-reported.
-fn finish_discovery(
-    mut found: Vec<(PathBuf, String, String)>,
-) -> Vec<(PathBuf, String, String)> {
+fn finish_discovery(mut found: Vec<(PathBuf, String, String)>) -> Vec<(PathBuf, String, String)> {
     let locks: std::collections::BTreeSet<(String, String)> = found
         .iter()
         .filter(|(_, _, name)| !lockfile::is_manifest(name))

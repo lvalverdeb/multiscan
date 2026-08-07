@@ -86,8 +86,7 @@ const MAX_PATTERN_BYTES: usize = 4_096;
 /// cap is skipped (one bad rule never aborts a scan); the rest still apply.
 pub fn parse_pack(bytes: &[u8]) -> Result<RulePack, String> {
     let digest = format!("blake3:{}", blake3::hash(bytes).to_hex());
-    let parsed: PackFile =
-        serde_json::from_slice(bytes).map_err(|e| format!("rule pack: {e}"))?;
+    let parsed: PackFile = serde_json::from_slice(bytes).map_err(|e| format!("rule pack: {e}"))?;
     let rules = parsed
         .rules
         .into_iter()
@@ -179,10 +178,7 @@ mod tests {
                 "pypi-token",
                 format!("pypi-AgEIcHlwaS5vcmc{}", "Ab-C".repeat(15)),
             ),
-            (
-                "stripe-secret-key",
-                format!("sk_live_{}", "4eC9".repeat(7)),
-            ),
+            ("stripe-secret-key", format!("sk_live_{}", "4eC9".repeat(7))),
             (
                 "sendgrid-api-key",
                 format!("SG.{}.{}", "aB-9zK4mPq1XwE8rT5uY0s", "C".repeat(43)),
@@ -255,7 +251,10 @@ mod tests {
             // Unquoted value: keyword rule requires quotes to bound the value.
             ("keyword-context-secret", "password = hunter2limited"),
             // URL without a password component.
-            ("database-url-credentials", "postgres://db.internal:5432/app"),
+            (
+                "database-url-credentials",
+                "postgres://db.internal:5432/app",
+            ),
         ];
         for (id, sample) in negatives {
             let r = rule(id);

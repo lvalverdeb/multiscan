@@ -41,7 +41,16 @@ fn scan(cache: &Path, project: &Path, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_multiscan"))
         .env("MULTISCAN_CACHE_DIR", cache)
         .current_dir(project)
-        .args(["scan", ".", "--layers", "secrets", "--offline", "--no-store", "--format", "json"])
+        .args([
+            "scan",
+            ".",
+            "--layers",
+            "secrets",
+            "--offline",
+            "--no-store",
+            "--format",
+            "json",
+        ])
         .args(extra)
         .output()
         .expect("binary runs")
@@ -99,11 +108,7 @@ fn corrupt_feed_pack_falls_back_to_builtin() {
     seed_pack(cache.path(), "{ not valid json");
 
     let project = tempfile::tempdir().unwrap();
-    std::fs::write(
-        project.path().join("app.env"),
-        "KEY=AKIAIOSFODNN7EXAMPLE\n",
-    )
-    .unwrap();
+    std::fs::write(project.path().join("app.env"), "KEY=AKIAIOSFODNN7EXAMPLE\n").unwrap();
 
     let out = scan(cache.path(), project.path(), &["--quiet"]);
     // Embedded rule still detects the AWS key despite the bad feed pack.

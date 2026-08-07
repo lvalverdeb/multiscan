@@ -170,8 +170,8 @@ impl Engine for SecretsEngine {
             // ADR 0005: known-noise files (built-in list + configured
             // entropy_exclude) keep the precise rules but lose the entropy
             // fallback — their high-entropy content is checksums, not secrets.
-            let entropy_enabled = !noise::entropy_noise_path(&rel)
-                && !ctx.excludes.is_entropy_excluded(&rel);
+            let entropy_enabled =
+                !noise::entropy_noise_path(&rel) && !ctx.excludes.is_entropy_excluded(&rel);
             self.scan_text(&text, &rel, entropy_enabled, None, sink)
                 .map_err(|e| EngineError::Failed(e.to_string()))?;
         }

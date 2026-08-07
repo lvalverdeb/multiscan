@@ -132,11 +132,13 @@ leaked = "{AWS_KEY_ID}"
     let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let arr = findings.as_array().unwrap();
     assert!(
-        !arr.iter().any(|f| f["identity"]["rule_id"] == "high-entropy-string"),
+        !arr.iter()
+            .any(|f| f["identity"]["rule_id"] == "high-entropy-string"),
         "lockfile checksums must not fire the entropy fallback: {arr:?}"
     );
     assert!(
-        arr.iter().any(|f| f["identity"]["rule_id"] == "aws-access-key-id"),
+        arr.iter()
+            .any(|f| f["identity"]["rule_id"] == "aws-access-key-id"),
         "precise rules must still run on lockfiles: {arr:?}"
     );
 }
@@ -217,7 +219,11 @@ fn entropy_exclude_config_extends_builtin() {
     let out = scan(project.path(), &["--format", "json", "--no-store"]);
     let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(
-        findings.as_array().unwrap().iter().any(|f| f["identity"]["rule_id"] == "high-entropy-string"),
+        findings
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["identity"]["rule_id"] == "high-entropy-string"),
         "{findings:?}"
     );
 
@@ -230,8 +236,16 @@ fn entropy_exclude_config_extends_builtin() {
     let out = scan(project.path(), &["--format", "json", "--no-store"]);
     let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let arr = findings.as_array().unwrap();
-    assert!(!arr.iter().any(|f| f["identity"]["rule_id"] == "high-entropy-string"), "{arr:?}");
-    assert!(arr.iter().any(|f| f["identity"]["rule_id"] == "aws-access-key-id"), "{arr:?}");
+    assert!(
+        !arr.iter()
+            .any(|f| f["identity"]["rule_id"] == "high-entropy-string"),
+        "{arr:?}"
+    );
+    assert!(
+        arr.iter()
+            .any(|f| f["identity"]["rule_id"] == "aws-access-key-id"),
+        "{arr:?}"
+    );
 }
 
 /// Pack-corpus detectors resolve at the CLI boundary, and SEC-101 holds for

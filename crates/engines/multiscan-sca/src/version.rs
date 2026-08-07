@@ -183,7 +183,9 @@ fn cmp_rubygems(a: &str, b: &str) -> Ordering {
             while !rest.is_empty() {
                 let cut = rest
                     .char_indices()
-                    .find(|(_, c)| c.is_ascii_digit() != rest.starts_with(|r: char| r.is_ascii_digit()))
+                    .find(|(_, c)| {
+                        c.is_ascii_digit() != rest.starts_with(|r: char| r.is_ascii_digit())
+                    })
                     .map(|(i, _)| i)
                     .unwrap_or(rest.len());
                 let (head, tail) = rest.split_at(cut);
@@ -450,7 +452,10 @@ mod tests {
         // Pre-release segments sort below the release.
         assert_eq!(Scheme::RubyGems.compare("1.0.0.beta1", "1.0.0"), Less);
         assert_eq!(Scheme::RubyGems.compare("1.0.0.beta1", "1.0.0.beta2"), Less);
-        assert_eq!(Scheme::RubyGems.compare("1.0.0.rc1", "1.0.0.beta9"), Greater);
+        assert_eq!(
+            Scheme::RubyGems.compare("1.0.0.rc1", "1.0.0.beta9"),
+            Greater
+        );
         // `-` reads as `.pre.`.
         assert_eq!(Scheme::RubyGems.compare("1.0.0-alpha", "1.0.0"), Less);
         // Numeric, not string.
@@ -464,7 +469,10 @@ mod tests {
         assert_eq!(Scheme::Composer.compare("v1.2.3", "1.2.3"), Equal);
         assert_eq!(Scheme::Composer.compare("1.0.0-RC1", "1.0.0"), Less);
         assert_eq!(Scheme::Composer.compare("1.0.0-rc1", "1.0.0-rc2"), Less);
-        assert_eq!(Scheme::Composer.compare("1.0.0-alpha1", "1.0.0-beta1"), Less);
+        assert_eq!(
+            Scheme::Composer.compare("1.0.0-alpha1", "1.0.0-beta1"),
+            Less
+        );
         assert_eq!(Scheme::Composer.compare("1.10.0", "1.9.9"), Greater);
         // Branch versions rank as dev, below any numbered release.
         assert_eq!(Scheme::Composer.compare("dev-master", "0.0.1"), Less);

@@ -77,7 +77,10 @@ fn update() -> Result<Exit> {
     // both configures the fetch and — since the operator explicitly chose
     // this host — allow-lists it for the feed client (R-6: the allow-list
     // only ever widens by explicit operator action, never silently).
-    let client = match std::env::var("MULTISCAN_RULES_URL").ok().filter(|u| !u.is_empty()) {
+    let client = match std::env::var("MULTISCAN_RULES_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
+    {
         Some(url) => {
             let allow = multiscan_feeds::DEFAULT_ALLOWED_HOSTS
                 .iter()

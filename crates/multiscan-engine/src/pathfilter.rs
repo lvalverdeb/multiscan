@@ -84,13 +84,21 @@ impl PathFilter {
         let global = compile(&scan.exclude, "scan")?;
         let mut per_layer = BTreeMap::new();
         let sections: [(Layer, Option<&[String]>, &str); 3] = [
-            (Layer::Sca, scan.sca.as_ref().map(|s| &s.exclude[..]), "scan.sca"),
+            (
+                Layer::Sca,
+                scan.sca.as_ref().map(|s| &s.exclude[..]),
+                "scan.sca",
+            ),
             (
                 Layer::Secrets,
                 scan.secrets.as_ref().map(|s| &s.exclude[..]),
                 "scan.secrets",
             ),
-            (Layer::Iac, scan.iac.as_ref().map(|s| &s.exclude[..]), "scan.iac"),
+            (
+                Layer::Iac,
+                scan.iac.as_ref().map(|s| &s.exclude[..]),
+                "scan.iac",
+            ),
         ];
         for (layer, exclude, name) in sections {
             let Some(exclude) = exclude else { continue };

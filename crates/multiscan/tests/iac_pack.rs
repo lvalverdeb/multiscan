@@ -44,7 +44,16 @@ fn scan(cache: &Path, project: &Path, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_multiscan"))
         .env("MULTISCAN_CACHE_DIR", cache)
         .current_dir(project)
-        .args(["scan", ".", "--layers", "iac", "--offline", "--no-store", "--format", "json"])
+        .args([
+            "scan",
+            ".",
+            "--layers",
+            "iac",
+            "--offline",
+            "--no-store",
+            "--format",
+            "json",
+        ])
         .args(extra)
         .output()
         .expect("binary runs")

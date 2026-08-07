@@ -187,9 +187,7 @@ pub fn enumerate(root: &Path) -> Result<HistoryScan, String> {
                     break 'chunks;
                 }
                 if total + size > MAX_TOTAL_BYTES && truncated.is_none() {
-                    truncated = Some(format!(
-                        "git history truncated at {MAX_TOTAL_BYTES} bytes"
-                    ));
+                    truncated = Some(format!("git history truncated at {MAX_TOTAL_BYTES} bytes"));
                     break 'chunks;
                 }
             }

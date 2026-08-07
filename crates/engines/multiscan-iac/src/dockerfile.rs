@@ -24,8 +24,7 @@ pub fn is_dockerfile(file_name: &str) -> bool {
         return true;
     }
     if let Some(suffix) = lower.strip_prefix("dockerfile.") {
-        const NON_DOCKER: &[&str] =
-            &["md", "txt", "rst", "yml", "yaml", "json", "html", "adoc"];
+        const NON_DOCKER: &[&str] = &["md", "txt", "rst", "yml", "yaml", "json", "html", "adoc"];
         return !NON_DOCKER.contains(&suffix);
     }
     false
@@ -84,9 +83,18 @@ fn is_literal_secret_value(value: &str) -> bool {
 /// Whether an env/arg key name reads as a secret.
 fn is_secret_key(key: &str) -> bool {
     let k = key.to_ascii_lowercase();
-    ["password", "passwd", "secret", "api_key", "apikey", "token", "access_key", "private_key"]
-        .iter()
-        .any(|needle| k.contains(needle))
+    [
+        "password",
+        "passwd",
+        "secret",
+        "api_key",
+        "apikey",
+        "token",
+        "access_key",
+        "private_key",
+    ]
+    .iter()
+    .any(|needle| k.contains(needle))
 }
 
 /// A `RUN` body that pipes a network fetch straight into a shell.
@@ -162,13 +170,16 @@ pub fn parse(text: &str, source_path: &str) -> Result<Vec<Resource>, String> {
                 };
                 match instruction.as_str() {
                     "USER" => {
-                        stage.user =
-                            args.split(':').next().map(|u| u.trim().to_ascii_lowercase());
+                        stage.user = args
+                            .split(':')
+                            .next()
+                            .map(|u| u.trim().to_ascii_lowercase());
                     }
                     "ADD" => {
-                        if args.split_whitespace().any(|tok| {
-                            tok.starts_with("http://") || tok.starts_with("https://")
-                        }) {
+                        if args
+                            .split_whitespace()
+                            .any(|tok| tok.starts_with("http://") || tok.starts_with("https://"))
+                        {
                             stage.adds_remote_url = true;
                         }
                     }
@@ -248,7 +259,13 @@ mod tests {
 
     #[test]
     fn recognizes_dockerfile_names() {
-        for n in ["Dockerfile", "dockerfile", "Dockerfile.prod", "api.Dockerfile", "Containerfile"] {
+        for n in [
+            "Dockerfile",
+            "dockerfile",
+            "Dockerfile.prod",
+            "api.Dockerfile",
+            "Containerfile",
+        ] {
             assert!(is_dockerfile(n), "{n}");
         }
         for n in ["Dockerfile.md", "readme.txt", "docker-compose.yaml"] {
@@ -289,9 +306,7 @@ mod tests {
 
     #[test]
     fn line_continuation_and_comments() {
-        let r = attrs(
-            "# base\nFROM alpine:3.19\nRUN curl -fsSL https://get.example \\\n  | sh\n",
-        );
+        let r = attrs("# base\nFROM alpine:3.19\nRUN curl -fsSL https://get.example \\\n  | sh\n");
         assert!(flag(&r[0], "curl_pipe_shell"), "continuation must join");
     }
 
@@ -313,16 +328,25 @@ mod tests {
         assert_eq!(r.len(), 2);
         assert!(flag(&r[0], "effective_user_root"));
         assert!(!flag(&r[0], "is_final_stage"));
-        assert!(!flag(&r[1], "effective_user_root"), "final stage is non-root");
+        assert!(
+            !flag(&r[1], "effective_user_root"),
+            "final stage is non-root"
+        );
         assert!(flag(&r[1], "is_final_stage"));
-        assert!(!flag(&r[1], "base_image_floating"), "tagged base does not float");
+        assert!(
+            !flag(&r[1], "base_image_floating"),
+            "tagged base does not float"
+        );
     }
 
     #[test]
     fn from_prior_stage_is_not_a_floating_image() {
         // The final image is a previous stage by name: not a registry pull.
         let r = attrs("FROM alpine:3.19 AS base\nFROM base\nUSER app\n");
-        assert!(!flag(&r[1], "base_image_floating"), "stage ref must not float");
+        assert!(
+            !flag(&r[1], "base_image_floating"),
+            "stage ref must not float"
+        );
     }
 
     #[test]
