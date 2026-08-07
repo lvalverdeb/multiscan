@@ -663,7 +663,7 @@ phase_6_polish:
 | Q-01 | Full OSV mirror vs API queries? | Open | Local mirror; API only as an explicit opt-in for freshness. Offline is the default posture. |
 | Q-02 | Reachability analysis for SCA (is the vulnerable symbol called?) | Deferred to v2 | Omit factor; treat as unknown. Do not guess. |
 | Q-03 | Rule pack distribution: embedded vs downloadable? | Open | Embedded for secrets/IaC (FD-007); downloadable for OSV. |
-| Q-04 | Semgrep rule syntax compatibility in v2 SAST | ADR 0014 proposed | Superseded default (see ADR 0014): a defined Semgrep subset (`MS-PAT-1`) with a mechanically translated corpus — the original "own minimal syntax" default died with ADR 0013's authorship constraint. |
+| Q-04 | Semgrep rule syntax compatibility in v2 SAST | Resolved by ADR 0014 | A defined Semgrep subset (`MS-PAT-1`) with a mechanically translated corpus — the original "own minimal syntax" default died with ADR 0013's authorship constraint. |
 | Q-05 | Plugin/WASM engines for third parties | Deferred | First-party engines only. Bridges cover external tools. |
 | Q-06 | When does the auditor persona force a server? | Open | SQLite + `Store` trait until a concrete customer needs cross-machine history. |
 

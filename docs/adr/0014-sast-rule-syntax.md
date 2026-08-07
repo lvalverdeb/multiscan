@@ -1,6 +1,6 @@
 # ADR 0014: SAST rule syntax — a defined subset of Semgrep pattern syntax
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-07
 - Extends: §7.5 (SAST, v2 scope) and the phase-2 sketch's workstream A;
   resolves §17 Q-04. Binds nothing in v1 scope.
