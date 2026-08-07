@@ -538,10 +538,17 @@ fn same_cve_advisories_merge_into_one_finding() {
         .iter()
         .filter(|f| f["asset"]["identifier"] == "pkg:npm/widget@1.0.0")
         .collect();
-    assert_eq!(widget.len(), 1, "GHSA + PYSEC of one CVE must be one finding: {widget:?}");
+    assert_eq!(
+        widget.len(),
+        1,
+        "GHSA + PYSEC of one CVE must be one finding: {widget:?}"
+    );
     let f = widget[0];
     assert_eq!(f["identity"]["advisory_id"], "CVE-2099-1234");
-    assert_eq!(f["severity"], "high", "merged finding takes the max severity");
+    assert_eq!(
+        f["severity"], "high",
+        "merged finding takes the max severity"
+    );
     // Both constituent OSV records appear as sources (dedup by shared CVE).
     let rules: Vec<String> = f["sources"]
         .as_array()

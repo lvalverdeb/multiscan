@@ -319,8 +319,14 @@ mod tests {
             "ranges":[{"type":"GIT","events":[{"introduced":"0"},{"fixed":"abc123"}]},
                       {"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}"#,
         );
-        assert!(adv.matches("PyPI", "redis", "8.0.1").is_none(), "unbounded range must defer to the versions list");
-        assert!(adv.matches("PyPI", "redis", "6.4.0").is_some(), "an enumerated version still matches");
+        assert!(
+            adv.matches("PyPI", "redis", "8.0.1").is_none(),
+            "unbounded range must defer to the versions list"
+        );
+        assert!(
+            adv.matches("PyPI", "redis", "6.4.0").is_some(),
+            "an enumerated version still matches"
+        );
     }
 
     #[test]
@@ -344,7 +350,10 @@ mod tests {
             "versions":["1.0","1.1"],
             "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"1.0"},{"fixed":"1.3"}]}]}]}"#,
         );
-        assert!(adv.matches("PyPI", "bar", "1.2.5").is_some(), "bounded range covers a non-enumerated in-range version");
+        assert!(
+            adv.matches("PyPI", "bar", "1.2.5").is_some(),
+            "bounded range covers a non-enumerated in-range version"
+        );
         assert!(adv.matches("PyPI", "bar", "1.3").is_none());
     }
 

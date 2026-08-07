@@ -130,8 +130,5 @@ fn airgap_export_import_scan_identical() {
     // And it actually found the vulnerability (not identical-but-empty).
     let findings: serde_json::Value = serde_json::from_slice(&scan_b.stdout).unwrap();
     assert_eq!(findings.as_array().unwrap().len(), 1);
-    assert_eq!(
-        findings[0]["identity"]["advisory_id"],
-        "CVE-2021-23337"
-    );
+    assert_eq!(findings[0]["identity"]["advisory_id"], "CVE-2021-23337");
 }
