@@ -13,6 +13,15 @@ blake3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+ruff_python_parser.workspace = true
+ruff_python_ast.workspace = true
+ruff_text_size.workspace = true
+swc_ecma_parser.workspace = true
+swc_ecma_ast.workspace = true
+swc_common.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

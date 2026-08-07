@@ -40,7 +40,7 @@ default-members = [
 [workspace.package]
 version = "0.2.1"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "MIT"
 
 [workspace.dependencies]
@@ -83,6 +83,17 @@ debversion = "0.5"
 rpm = { version = "0.18", default-features = false }
 psl = "2"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+
+# SAST source parsers (ADR 0015). Pinned exactly: ruff's crates are 0.0.x with
+# no semver guarantee and swc moves fast, so a refresh is a reviewed event, not
+# resolver drift. Both ASTs stay behind their front-end module — no ruff_* or
+# swc_* type appears in a pub signature outside it.
+ruff_python_parser = "=0.0.8"
+ruff_python_ast = "=0.0.8"
+ruff_text_size = "=0.0.8"
+swc_ecma_parser = "=43.0.0"
+swc_ecma_ast = "=27.0.0"
+swc_common = "=24.0.0"
 
 # Network (feeds + probe only; scan targets go through multiscan-scope, R-6).
 # ureq 3 = blocking + rustls/ring — no async runtime, no aws-lc build deps.

@@ -1,4 +1,4 @@
-msrv = "1.85"
+msrv = "1.95"
 
 # CLAUDE.md: unwrap/expect/panic are allowed in tests.
 allow-unwrap-in-tests = true

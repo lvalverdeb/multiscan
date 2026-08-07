@@ -67,6 +67,11 @@ translator (`T-705`) counts the dropped rule rather than dropping it silently.
 A leaf pattern is **source code of the target language with holes**. It is
 compiled by that language's front-end (`T-702`), not by the operator layer.
 
+A leaf pattern must be a **single construct**. A multi-statement pattern is
+rejected at pack load: it would compile to a whole-file pattern that could only
+match at the module root, silently never matching what the author meant. Use
+`pattern-inside` for context, or separate rules.
+
 ### Metavariables
 
 `$NAME` — uppercase ASCII letters, digits and underscore, beginning with a

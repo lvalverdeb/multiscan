@@ -109,7 +109,7 @@ impl FixtureEngine {
             },
             title: format!("Fixture finding {index:03}"),
             description: None,
-            severity: if index % 2 == 0 {
+            severity: if index.is_multiple_of(2) {
                 Severity::Medium
             } else {
                 Severity::High

@@ -90,9 +90,9 @@ crates/
 schemas/  rules/  testdata/{corpus,vectors,lab}/  fuzz/  docs/
 ```
 
-MSRV 1.85 (ADR 0001), edition 2021. Rising to 1.95 with `T-702` (ADR 0015 — phase-2 source parsers);
-until that lands, 1.85 is the floor and dependencies that require more are pinned back.
-Workspace-level dependency versions only — no per-crate version drift.
+MSRV 1.95 (ADR 0015, superseding ADR 0001 — raised with `T-702` for the phase-2 source parsers).
+Workspace-level dependency versions only — no per-crate version drift. The SAST parsers
+(`ruff_*`, `swc_*`) are pinned exactly: a refresh is a reviewed event, not resolver drift.
 
 ---
 

@@ -11,17 +11,31 @@
 //!
 //! The contract this implements is `docs/ms-pat-1.md`.
 
+pub mod compile;
+pub mod lang;
 pub mod matcher;
 pub mod pattern;
 pub mod rules;
 pub mod tree;
 
-use multiscan_core::{EngineManifest, FindingClass, Layer, NetworkImpact, Severity};
+use std::path::{Path, PathBuf};
+
+use multiscan_core::{
+    Asset, AssetKind, EngineManifest, Evidence, FindingClass, IdentityKey, Layer, Location,
+    NetworkImpact, RawFinding, Severity,
+};
 use multiscan_engine::{
-    Applicability, Engine, EngineError, EngineOutcome, FindingSink, ScanContext,
+    Applicability, Engine, EngineError, EngineOutcome, FindingSink, PathFilter, ScanContext,
 };
 
+use crate::compile::CompiledRule;
+use crate::rules::Language;
 use crate::tree::Node;
+
+/// Files larger than this are skipped. Source, not blobs; untrusted input.
+const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+/// Directory-walk bound, mirroring the other file-walking engines.
+const MAX_FILES_VISITED: usize = 1_000_000;
 
 /// Domain separator for the structural hash. Bumping it changes every
 /// `StructuralPattern` finding_id, so it is frozen (cf. dedup's identity
@@ -66,17 +80,91 @@ pub fn structural_hash_of(node: &Node) -> String {
     structural_hash(&kinds, &names)
 }
 
-/// The SAST engine. Still `NotApplicable` until `T-702` supplies the language
-/// front-ends that can turn source into a [`tree::Node`] — with no parser there
-/// is nothing to match against, and reporting `Complete` over zero files would
-/// wrongly close findings (§7.7.4).
+/// Which front-end handles a file extension, or `None` if the language is
+/// unsupported (`SAST-003`).
+///
+/// Extension-only by construction: no file is opened to decide this, which is
+/// what keeps `applicable()` cheap.
+pub fn language_for_extension(extension: &str) -> Option<Language> {
+    let ext = extension.to_ascii_lowercase();
+    if lang::python::EXTENSIONS.contains(&ext.as_str()) {
+        Some(Language::Python)
+    } else if lang::javascript::EXTENSIONS.contains(&ext.as_str()) {
+        if lang::javascript::is_typescript(&ext) {
+            Some(Language::Typescript)
+        } else {
+            Some(Language::Javascript)
+        }
+    } else {
+        None
+    }
+}
+
+/// Discover source files a front-end can handle.
+///
+/// Extension-only, exclude-aware, and bounded. Results are sorted by relative
+/// path so emission order does not depend on the filesystem (`DET-002`).
+fn find_files(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, Language)> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    let mut visited = 0usize;
+
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            visited += 1;
+            if visited > MAX_FILES_VISITED {
+                found.sort_by(|a: &(PathBuf, String, Language), b| a.1.cmp(&b.1));
+                return found;
+            }
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if excludes.is_excluded(Layer::Sast, &rel) || excludes.is_ignored(&rel, is_dir) {
+                continue; // matched dirs prune the walk, matched files skip
+            }
+            if is_dir {
+                stack.push(path);
+                continue;
+            }
+            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+                continue;
+            };
+            if let Some(language) = language_for_extension(ext) {
+                found.push((path, rel, language));
+            }
+        }
+    }
+    found.sort_by(|a, b| a.1.cmp(&b.1));
+    found
+}
+
+/// The SAST engine: MS-PAT-1 rules matched structurally over parsed source.
+///
+/// Rules are injected rather than embedded. `multiscan-sast` authors no
+/// vulnerability knowledge (§1.2) — the corpus is a mechanically translated
+/// pack delivered over the feed channel (ADR 0014, `T-705`). With no rules the
+/// engine is `NotApplicable`, which also means it can never report `Complete`
+/// over zero rules and wrongly close findings (§7.7.4).
 pub struct SastEngine {
     manifest: EngineManifest,
+    rules: Vec<CompiledRule>,
 }
 
 impl SastEngine {
-    /// Construct the scaffold engine.
+    /// Construct the engine with no rules. Inert until a pack is supplied.
     pub fn new() -> Self {
+        Self::with_rules(Vec::new())
+    }
+
+    /// Construct the engine with a compiled rule set.
+    pub fn with_rules(rules: Vec<CompiledRule>) -> Self {
         Self {
             manifest: EngineManifest {
                 id: "multiscan.sast".to_string(),
@@ -86,14 +174,71 @@ impl SastEngine {
                 network_impact: NetworkImpact::ReadOnly,
                 requires_authorization: false,
                 rule_set: None,
-                // No rules ship in v1, but the manifest still declares an
-                // explicit (empty) severity map to satisfy ENG-004.
+                // Every rule carries its own explicit severity (SAST-004); this
+                // map remains the manifest-level declaration ENG-004 requires.
                 severity_map: [("structural", Severity::Medium)]
                     .into_iter()
                     .map(|(k, v)| (k.to_string(), v))
                     .collect(),
             },
+            rules,
         }
+    }
+
+    /// Match every applicable rule against one parsed file, emitting Findings.
+    fn match_file(
+        &self,
+        tree: &Node,
+        rel_path: &str,
+        language: Language,
+        sink: &mut dyn FindingSink,
+    ) -> Result<(), multiscan_engine::SinkError> {
+        for rule in &self.rules {
+            let Some(expr) = rule.per_language.get(&language) else {
+                continue;
+            };
+            // Buffered per rule per file — bounded by one file's match count,
+            // never the whole scan (NFR-003) — because the matcher's callback
+            // cannot propagate a SinkError out of the walk.
+            let mut emitted = Vec::new();
+            matcher::for_each_match(expr, tree, |m| {
+                emitted.push((structural_hash_of(m.node), m.node.span.line));
+            });
+            for (structural_hash, line) in emitted {
+                sink.emit(RawFinding {
+                    identity: IdentityKey::StructuralPattern {
+                        rule_id: rule.id.clone(),
+                        path: rel_path.to_string(),
+                        structural_hash: structural_hash.clone(),
+                    },
+                    title: rule.message.clone(),
+                    description: None,
+                    severity: rule.severity,
+                    confidence: rule.confidence,
+                    asset: Asset {
+                        kind: AssetKind::File,
+                        identifier: rel_path.to_string(),
+                    },
+                    location: Location {
+                        path: rel_path.to_string(),
+                        line: Some(line as i64),
+                    },
+                    evidence: vec![Evidence {
+                        kind: "structural_match".to_string(),
+                        summary: format!(
+                            "rule {} matched structurally ({structural_hash})",
+                            rule.id
+                        ),
+                        detail: serde_json::Map::new(),
+                        dependency_path: vec![],
+                    }],
+                    rule_id: Some(rule.id.clone()),
+                    remediation: None,
+                    cwe: vec![],
+                })?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -108,20 +253,79 @@ impl Engine for SastEngine {
         &self.manifest
     }
 
-    fn applicable(&self, _ctx: &ScanContext) -> Applicability {
-        // T-701 ships the matcher core but no front-end can parse source yet;
-        // the engine stays inert until T-702. Cheap and I/O-free either way.
-        Applicability::NotApplicable
+    fn applicable(&self, ctx: &ScanContext) -> Applicability {
+        // No rules means nothing to match — and, critically, means we must not
+        // run and report Complete, which would close previously-reported
+        // findings (§7.7.4).
+        if self.rules.is_empty() {
+            return Applicability::NotApplicable;
+        }
+        // Extension-only: the walk reads directory entries, never file
+        // contents (SAST-003, ENG contract).
+        if find_files(&ctx.root, &ctx.excludes).is_empty() {
+            Applicability::NotApplicable
+        } else {
+            Applicability::Applicable
+        }
     }
 
     fn scan(
         &self,
-        _ctx: &ScanContext,
-        _sink: &mut dyn FindingSink,
+        ctx: &ScanContext,
+        sink: &mut dyn FindingSink,
     ) -> Result<EngineOutcome, EngineError> {
-        // Unreachable in practice (applicable() gates it); return Complete with
-        // zero units rather than error, so a direct call is harmless.
-        Ok(EngineOutcome::Complete { units_scanned: 0 })
+        let files = find_files(&ctx.root, &ctx.excludes);
+        let total = files.len() as u64;
+        let mut scanned = 0u64;
+        let mut degraded: Option<String> = None;
+
+        for (abs, rel, language) in files {
+            if ctx.should_stop() {
+                return Ok(EngineOutcome::Partial {
+                    units_scanned: scanned,
+                    reason: "cancelled or past deadline".to_string(),
+                });
+            }
+            scanned += 1;
+            sink.progress(scanned, Some(total));
+
+            if std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0) > MAX_FILE_BYTES {
+                degraded = Some(format!("{rel}: exceeds size cap"));
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&abs) else {
+                continue;
+            };
+
+            let parsed = match language {
+                Language::Python => lang::python::lower_source(&text),
+                Language::Javascript => lang::javascript::lower_source(&text, false),
+                Language::Typescript => lang::javascript::lower_source(&text, true),
+            };
+            let tree = match parsed {
+                Ok(tree) => tree,
+                Err(e) => {
+                    // A file that does not parse degrades the scan to Partial
+                    // rather than aborting it — and Partial cannot close
+                    // findings, so a syntax error never marks anything fixed.
+                    degraded = Some(format!("{rel}: {e}"));
+                    continue;
+                }
+            };
+
+            self.match_file(&tree, &rel, language, sink)
+                .map_err(|e| EngineError::Failed(e.to_string()))?;
+        }
+
+        match degraded {
+            Some(reason) => Ok(EngineOutcome::Partial {
+                units_scanned: scanned,
+                reason,
+            }),
+            None => Ok(EngineOutcome::Complete {
+                units_scanned: scanned,
+            }),
+        }
     }
 }
 
@@ -152,9 +356,212 @@ mod tests {
     }
 
     #[test]
-    fn engine_is_not_applicable() {
+    fn engine_without_rules_is_not_applicable() {
+        // No corpus, no run — and so no Complete that could close findings.
         let engine = SastEngine::new();
         let ctx = multiscan_engine::testkit::test_context(vec![Layer::Sast]);
         assert_eq!(engine.applicable(&ctx), Applicability::NotApplicable);
+    }
+
+    #[test]
+    fn extension_routing_covers_both_front_ends() {
+        assert_eq!(language_for_extension("py"), Some(Language::Python));
+        assert_eq!(language_for_extension("pyi"), Some(Language::Python));
+        assert_eq!(language_for_extension("js"), Some(Language::Javascript));
+        assert_eq!(language_for_extension("mjs"), Some(Language::Javascript));
+        assert_eq!(language_for_extension("ts"), Some(Language::Typescript));
+        assert_eq!(language_for_extension("tsx"), Some(Language::Typescript));
+        // SAST-003: unhandled languages are simply not claimed.
+        assert_eq!(language_for_extension("rs"), None);
+        assert_eq!(language_for_extension("go"), None);
+        assert_eq!(language_for_extension("java"), None);
+        // Case-insensitive, so a .PY file is not silently skipped.
+        assert_eq!(language_for_extension("PY"), Some(Language::Python));
+    }
+}
+
+#[cfg(test)]
+mod engine_tests {
+    use super::*;
+    use crate::rules::parse_pack;
+    use multiscan_engine::{testkit, SinkError};
+
+    /// Collects emissions; the registry's own sink is private to that crate.
+    #[derive(Default)]
+    struct CollectingSink {
+        findings: Vec<RawFinding>,
+    }
+
+    impl FindingSink for CollectingSink {
+        fn emit(&mut self, finding: RawFinding) -> Result<(), SinkError> {
+            self.findings.push(finding);
+            Ok(())
+        }
+        fn progress(&mut self, _done: u64, _total: Option<u64>) {}
+    }
+
+    fn eval_engine() -> SastEngine {
+        let pack = parse_pack(
+            br#"{"pack_id":"t","version":"1.0.0","rules":[{
+                "id": "eval-call",
+                "message": "eval on non-literal input",
+                "languages": ["python", "javascript", "typescript"],
+                "severity": "high",
+                "confidence": "heuristic",
+                "pattern": "eval($X)"
+            }]}"#,
+        )
+        .unwrap();
+        let (rules, rejected) = compile::compile_pack(&pack);
+        assert!(rejected.is_empty(), "rejected: {rejected:?}");
+        SastEngine::with_rules(rules)
+    }
+
+    fn write(dir: &std::path::Path, name: &str, body: &str) {
+        std::fs::write(dir.join(name), body).unwrap();
+    }
+
+    #[test]
+    fn unsupported_languages_degrade_and_the_scan_completes() {
+        // SAST-003, in full: a repo mixing handled and unhandled languages
+        // yields findings for what we parse and Complete overall — the
+        // unhandled files are simply not claimed, never an error.
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "app.py", "eval(user_input)\n");
+        write(dir.path(), "main.rs", "fn main() { eval(x); }\n");
+        write(
+            dir.path(),
+            "Server.java",
+            "class S { void f(){ eval(x); } }\n",
+        );
+        write(dir.path(), "notes.txt", "eval(everything)\n");
+
+        let mut ctx = testkit::test_context(vec![Layer::Sast]);
+        ctx.root = dir.path().to_path_buf();
+
+        let engine = eval_engine();
+        assert_eq!(engine.applicable(&ctx), Applicability::Applicable);
+
+        let mut sink = CollectingSink::default();
+        let outcome = engine.scan(&ctx, &mut sink).unwrap();
+
+        assert_eq!(
+            outcome,
+            EngineOutcome::Complete { units_scanned: 1 },
+            "only the Python file is a unit; the rest are not this engine's"
+        );
+        assert_eq!(sink.findings.len(), 1);
+        assert_eq!(sink.findings[0].location.path, "app.py");
+    }
+
+    #[test]
+    fn a_syntax_error_degrades_to_partial_and_cannot_close_findings() {
+        // §7.7.4: only Complete may close. A malformed file in someone's repo
+        // must not silently mark every other SAST finding fixed.
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "good.py", "eval(a)\n");
+        write(dir.path(), "broken.py", "def (:\n");
+
+        let mut ctx = testkit::test_context(vec![Layer::Sast]);
+        ctx.root = dir.path().to_path_buf();
+
+        let mut sink = CollectingSink::default();
+        let outcome = eval_engine().scan(&ctx, &mut sink).unwrap();
+
+        assert!(
+            matches!(outcome, EngineOutcome::Partial { .. }),
+            "got {outcome:?}"
+        );
+        // The healthy file still reported.
+        assert_eq!(sink.findings.len(), 1);
+    }
+
+    #[test]
+    fn findings_carry_structural_identity_and_a_line() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "app.py", "import os\n\neval(danger)\n");
+
+        let mut ctx = testkit::test_context(vec![Layer::Sast]);
+        ctx.root = dir.path().to_path_buf();
+
+        let mut sink = CollectingSink::default();
+        eval_engine().scan(&ctx, &mut sink).unwrap();
+
+        let finding = &sink.findings[0];
+        assert_eq!(finding.location.line, Some(3), "line is 1-based");
+        match &finding.identity {
+            IdentityKey::StructuralPattern {
+                rule_id,
+                path,
+                structural_hash,
+            } => {
+                assert_eq!(rule_id, "eval-call");
+                assert_eq!(path, "app.py");
+                assert!(structural_hash.starts_with("b3:"));
+            }
+            other => panic!("wrong identity: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reformatting_a_file_preserves_finding_identity() {
+        // SAST-002 end to end, through the Engine: the same code reformatted
+        // produces the same identity tuple, so a user's baseline survives a
+        // `black`/`prettier` run.
+        let identity_of = |body: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            write(dir.path(), "app.py", body);
+            let mut ctx = testkit::test_context(vec![Layer::Sast]);
+            ctx.root = dir.path().to_path_buf();
+            let mut sink = CollectingSink::default();
+            eval_engine().scan(&ctx, &mut sink).unwrap();
+            sink.findings[0].identity.clone()
+        };
+
+        assert_eq!(
+            identity_of("def f(a):\n    return eval(a)\n"),
+            identity_of("\n# reformatted\ndef f( a ):\n\n    return eval( a )\n"),
+        );
+    }
+
+    #[test]
+    fn typescript_files_route_to_the_typescript_grammar() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "app.ts", "const x: string = eval(y as any);\n");
+
+        let mut ctx = testkit::test_context(vec![Layer::Sast]);
+        ctx.root = dir.path().to_path_buf();
+
+        let mut sink = CollectingSink::default();
+        let outcome = eval_engine().scan(&ctx, &mut sink).unwrap();
+
+        assert_eq!(outcome, EngineOutcome::Complete { units_scanned: 1 });
+        assert_eq!(sink.findings.len(), 1);
+    }
+
+    #[test]
+    fn emission_order_is_stable_across_runs() {
+        // DET-002: sorted discovery, pre-order matching. Same repo, same order.
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["c.py", "a.py", "b.js"] {
+            write(dir.path(), name, "eval(x)\n");
+        }
+        let mut ctx = testkit::test_context(vec![Layer::Sast]);
+        ctx.root = dir.path().to_path_buf();
+
+        let paths = || {
+            let mut sink = CollectingSink::default();
+            eval_engine().scan(&ctx, &mut sink).unwrap();
+            sink.findings
+                .iter()
+                .map(|f| f.location.path.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let first = paths();
+        assert_eq!(first, vec!["a.py", "b.js", "c.py"]);
+        for _ in 0..20 {
+            assert_eq!(first, paths());
+        }
     }
 }
