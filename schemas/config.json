@@ -86,7 +86,8 @@
       "properties": {
         "sca_db": { "description": "Pinned advisory snapshot, e.g. osv@2026-08-05.", "type": "string" },
         "iac_pack": { "description": "Pinned IaC policy pack, e.g. cis-bundle@1.9.0.", "type": "string" },
-        "secrets_pack": { "description": "Pinned secrets rule pack.", "type": "string" }
+        "secrets_pack": { "description": "Pinned secrets rule pack.", "type": "string" },
+        "sast_pack": { "description": "Pinned SAST rule pack (MS-PAT-1), e.g. community-py-js@1.0.0.", "type": "string" }
       }
     },
     "SuppressEntry": {

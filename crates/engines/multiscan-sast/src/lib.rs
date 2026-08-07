@@ -1,27 +1,43 @@
-//! SAST scaffold: structural_hash only in v1, no rules (spec 7.5, NG-2).
+//! Structural pattern matching over source code (spec 7.5).
 //!
-//! v1 ships the crate skeleton, an `Engine` that is always `NotApplicable`, and
-//! the [`structural_hash`] function that dedup needs for the `StructuralPattern`
-//! identity (spec 7.7.2). **No detection rules, and no taint analysis — NG-2
-//! stands permanently.** tree-sitter parsing and rule matching are v2 scope.
+//! v1 shipped the scaffold and [`structural_hash`] only (`T-604`). `T-701` adds
+//! the language-independent core: the [`tree`] both front-ends lower into, the
+//! MS-PAT-1 [`pattern`] representation, the [`matcher`], and [`rules`] pack
+//! loading. Language front-ends — the parsers that turn real source and leaf
+//! pattern text into these types — arrive with `T-702` (ADR 0015).
+//!
+//! **NG-2 stands permanently: structural matching only, no taint or dataflow
+//! analysis.** [`pattern::PatternExpr`] has no variant that could express it.
+//!
+//! The contract this implements is `docs/ms-pat-1.md`.
+
+pub mod matcher;
+pub mod pattern;
+pub mod rules;
+pub mod tree;
 
 use multiscan_core::{EngineManifest, FindingClass, Layer, NetworkImpact, Severity};
 use multiscan_engine::{
     Applicability, Engine, EngineError, EngineOutcome, FindingSink, ScanContext,
 };
 
+use crate::tree::Node;
+
 /// Domain separator for the structural hash. Bumping it changes every
 /// `StructuralPattern` finding_id, so it is frozen (cf. dedup's identity
 /// encoding).
 const STRUCTURAL_DOMAIN: &[u8] = b"multiscan:structural_hash:v1";
 
-/// Hash the *shape* of a code fragment: its tree-sitter node kinds plus its
+/// Hash the *shape* of a code fragment: its canonical node kinds plus its
 /// normalized identifiers — never raw line numbers or literal text (spec
-/// 7.7.2, line 405). Two fragments that differ only in whitespace, line
-/// position, or (with normalization) identifier spelling produce the same hash,
-/// so a `StructuralPattern` finding is stable across cosmetic edits.
+/// 7.7.2, amended by ADR 0016). Two fragments that differ only in whitespace,
+/// line position, or (with normalization) identifier spelling produce the same
+/// hash, so a `StructuralPattern` finding is stable across cosmetic edits.
 ///
-/// v1 exposes the canonical function; real callers arrive with v2 SAST.
+/// Kinds come from [`tree::Kind`] — MultiScan's own closed vocabulary, not a
+/// parser's — so identity survives a parser upgrade or replacement
+/// (ADR 0015). Prefer [`structural_hash_of`], which derives both arguments
+/// from a matched subtree in the frozen pre-order form.
 pub fn structural_hash(node_kinds: &[&str], normalized_identifiers: &[&str]) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(STRUCTURAL_DOMAIN);
@@ -38,8 +54,22 @@ pub fn structural_hash(node_kinds: &[&str], normalized_identifiers: &[&str]) -> 
     format!("b3:{}", &hasher.finalize().to_hex()[..24])
 }
 
-/// The v1 SAST engine: a registered no-op. `applicable()` is always
-/// `NotApplicable`, so `scan()` is never called (spec 7.5).
+/// Hash a matched subtree in the frozen form: pre-order canonical kinds plus
+/// normalized identifiers, spans excluded (`docs/ms-pat-1.md` §5).
+///
+/// This is the `structural_hash` component of the `StructuralPattern` identity
+/// tuple, so **reformatting a file does not change the resulting
+/// `finding_id`** (`SAST-002`). Changing what this function feeds the hash
+/// invalidates every user's baselines and suppressions — a stop-and-ask change.
+pub fn structural_hash_of(node: &Node) -> String {
+    let (kinds, names) = node.structural_parts();
+    structural_hash(&kinds, &names)
+}
+
+/// The SAST engine. Still `NotApplicable` until `T-702` supplies the language
+/// front-ends that can turn source into a [`tree::Node`] — with no parser there
+/// is nothing to match against, and reporting `Complete` over zero files would
+/// wrongly close findings (§7.7.4).
 pub struct SastEngine {
     manifest: EngineManifest,
 }
@@ -79,7 +109,8 @@ impl Engine for SastEngine {
     }
 
     fn applicable(&self, _ctx: &ScanContext) -> Applicability {
-        // v1 ships no rules; the engine never runs (NG-2).
+        // T-701 ships the matcher core but no front-end can parse source yet;
+        // the engine stays inert until T-702. Cheap and I/O-free either way.
         Applicability::NotApplicable
     }
 

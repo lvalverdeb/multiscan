@@ -375,7 +375,7 @@ requests:
 
 ## 7.5 `multiscan-sast` — [v2 SCOPE — scaffold only in v1]
 
-tree-sitter structural pattern matching. v1 ships the crate skeleton, the `Engine` impl returning `Applicability::NotApplicable`, and the `structural_hash` function (needed by dedup regardless). **No detection rules in v1.** NG-2 stands permanently: no taint analysis.
+Structural pattern matching over a parsed source tree. (Amended by ADR 0016 — the substrate is the pure-Rust parsers selected in ADR 0015, not tree-sitter.) v1 ships the crate skeleton, the `Engine` impl returning `Applicability::NotApplicable`, and the `structural_hash` function (needed by dedup regardless). **No detection rules in v1.** NG-2 stands permanently: no taint analysis. The v2 pattern subset is `MS-PAT-1` (ADR 0014), specified in `docs/ms-pat-1.md`.
 
 ## 7.6 `multiscan-bridge` — external scanner import
 
@@ -402,7 +402,7 @@ Required importers: SARIF 2.1.0 (generic), Trivy JSON, Semgrep JSON, Checkov JSO
 | `StructuralPattern` | rule ID, normalized path, `structural_hash` |
 
 - 7.7.3 Identity tuples MUST NOT include line/column numbers, timestamps, engine versions, scan metadata, or secret values. A field that can change while the underlying weakness stays the same does not belong in identity.
-- `structural_hash` lives in `multiscan-sast` and MUST hash tree-sitter node kinds plus normalized identifiers — never raw line numbers.
+- `structural_hash` lives in `multiscan-sast` and MUST hash canonical node kinds plus normalized identifiers — never raw line numbers. (Amended by ADR 0016 — kinds are MultiScan's own closed, append-only vocabulary, not the parser's, so identity survives a parser upgrade or replacement; the hashed form is pre-order kinds plus normalized identifiers, spans excluded.)
 - 7.7.4 **Closure rule:** a Finding transitions to `Fixed` only when an Engine that previously reported it returns `Complete` and omits it. `Partial` never closes anything.
 - 7.7.5 Two distinct `engine_id`s reporting the same `finding_id` MUST escalate confidence to at least `Corroborated`.
 
