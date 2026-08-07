@@ -24,6 +24,14 @@ use crate::tree::Kind;
 /// (ADR 0014) — external data, so recursion is bounded rather than trusted.
 pub const MAX_PATTERN_DEPTH: usize = 64;
 
+/// Maximum `...` items in a single child sequence.
+///
+/// Matching a sequence with *k* ellipses against *n* siblings explores O(n^k)
+/// splits. Depth caps do not bound *k*, so a feed-delivered pack could
+/// otherwise hang a scan with one wide rule. Real Semgrep rules use one or two;
+/// four is generous. Exceeding it is a load rejection, not a runtime hang.
+pub const MAX_ELLIPSES_PER_SEQUENCE: usize = 4;
+
 /// An item in a pattern's child sequence.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum SeqItem {
@@ -60,6 +68,39 @@ pub enum PatternNode {
 }
 
 impl PatternNode {
+    /// Reject sequences whose ellipsis use would make matching blow up.
+    ///
+    /// Two checks, both structural: adjacent `...` is redundant (`..., ...` is
+    /// exactly `...`) and doubles the split space for nothing, and more than
+    /// [`MAX_ELLIPSES_PER_SEQUENCE`] in one sequence is the O(n^k) case.
+    pub fn validate(&self) -> Result<(), PatternError> {
+        let PatternNode::Node { children, .. } = self else {
+            return Ok(());
+        };
+
+        let ellipses = children
+            .iter()
+            .filter(|item| matches!(item, SeqItem::Ellipsis))
+            .count();
+        if ellipses > MAX_ELLIPSES_PER_SEQUENCE {
+            return Err(PatternError::TooManyEllipses {
+                count: ellipses,
+                max: MAX_ELLIPSES_PER_SEQUENCE,
+            });
+        }
+        if children
+            .windows(2)
+            .any(|w| matches!(w, [SeqItem::Ellipsis, SeqItem::Ellipsis]))
+        {
+            return Err(PatternError::AdjacentEllipses);
+        }
+
+        children.iter().try_for_each(|item| match item {
+            SeqItem::Node(node) => node.validate(),
+            SeqItem::Ellipsis => Ok(()),
+        })
+    }
+
     /// Nesting depth of this leaf pattern.
     pub fn depth(&self) -> usize {
         match self {
@@ -132,7 +173,7 @@ impl PatternExpr {
 
     fn validate_inner(&self) -> Result<(), PatternError> {
         match self {
-            PatternExpr::Pattern(_) => Ok(()),
+            PatternExpr::Pattern(node) => node.validate(),
             PatternExpr::All(list) | PatternExpr::Either(list) => {
                 if list.is_empty() {
                     return Err(PatternError::EmptyOperandList);
@@ -164,6 +205,17 @@ pub enum PatternError {
     /// A leaf pattern consisting solely of `...`.
     #[error("`...` is a sequence operator and cannot be an entire pattern")]
     BareEllipsis,
+    /// Too many `...` in one child sequence — see [`MAX_ELLIPSES_PER_SEQUENCE`].
+    #[error("child sequence has {count} `...` items, exceeding the maximum of {max}")]
+    TooManyEllipses {
+        /// Observed count.
+        count: usize,
+        /// The cap.
+        max: usize,
+    },
+    /// `..., ...` — redundant, and it doubles the split space for nothing.
+    #[error("adjacent `...` items are redundant; use a single `...`")]
+    AdjacentEllipses,
     /// An operator outside MS-PAT-1.
     #[error("`{0}` is not an MS-PAT-1 operator")]
     UnknownOperator(String),
@@ -232,6 +284,52 @@ mod tests {
         // Nested, not just at the root.
         let nested = PatternExpr::Not(Box::new(PatternExpr::All(vec![])));
         assert_eq!(nested.validate(), Err(PatternError::EmptyOperandList));
+    }
+
+    #[test]
+    fn adjacent_ellipses_are_rejected() {
+        // `..., ...` is exactly `...` and doubles the split space for nothing.
+        let expr = PatternExpr::Pattern(PatternNode::Node {
+            kind: Kind::Call,
+            name: None,
+            children: vec![SeqItem::Ellipsis, SeqItem::Ellipsis],
+        });
+        assert_eq!(expr.validate(), Err(PatternError::AdjacentEllipses));
+    }
+
+    #[test]
+    fn too_many_ellipses_in_one_sequence_are_rejected() {
+        // The O(n^k) case: bounded at load, never at runtime.
+        let mut children = Vec::new();
+        for _ in 0..=MAX_ELLIPSES_PER_SEQUENCE {
+            children.push(SeqItem::Ellipsis);
+            children.push(SeqItem::Node(metavar("X")));
+        }
+        let expr = PatternExpr::Pattern(PatternNode::Node {
+            kind: Kind::Call,
+            name: None,
+            children,
+        });
+        assert!(matches!(
+            expr.validate(),
+            Err(PatternError::TooManyEllipses { .. })
+        ));
+    }
+
+    #[test]
+    fn ellipsis_checks_reach_nested_sequences() {
+        // The blowup can hide one level down.
+        let inner = PatternNode::Node {
+            kind: Kind::Argument,
+            name: None,
+            children: vec![SeqItem::Ellipsis, SeqItem::Ellipsis],
+        };
+        let expr = PatternExpr::Pattern(PatternNode::Node {
+            kind: Kind::Call,
+            name: None,
+            children: vec![SeqItem::Node(inner)],
+        });
+        assert_eq!(expr.validate(), Err(PatternError::AdjacentEllipses));
     }
 
     #[test]

@@ -9,12 +9,12 @@
 //! its severity, fails pack load rather than being silently downgraded
 //! (`SAST-004`, `ENG-004`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use multiscan_core::{Confidence, Severity};
 use serde::Deserialize;
 
-use crate::pattern::{PatternError, MAX_PATTERN_DEPTH};
+use crate::pattern::{PatternError, MAX_ELLIPSES_PER_SEQUENCE, MAX_PATTERN_DEPTH};
 
 /// Defensive caps for feed-delivered packs. Signed and digest-verified
 /// upstream, but still external data (ADR 0010).
@@ -180,12 +180,30 @@ pub fn parse_pack(bytes: &[u8]) -> Result<SastPack, PackError> {
     let parsed: PackFile =
         serde_json::from_slice(bytes).map_err(|e| PackError::Malformed(e.to_string()))?;
 
-    let mut rules = Vec::new();
-    let mut rejected = BTreeMap::new();
+    let mut rules: Vec<SastRule> = Vec::new();
+    let mut rejected: BTreeMap<String, String> = BTreeMap::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
 
     for rule in parsed.rules.into_iter().take(MAX_PACK_RULES) {
-        if let Err(reason) = check_rule(&rule) {
-            rejected.insert(rule.id, reason);
+        // Rule id is an identity input (§7.7.2): two rules sharing one would
+        // collide in the `finding_id` namespace, so the duplicate is rejected
+        // rather than shadowing.
+        let outcome = if !seen.insert(rule.id.clone()) {
+            Err("duplicate rule id".to_string())
+        } else {
+            check_rule(&rule)
+        };
+
+        if let Err(reason) = outcome {
+            // Keyed by id, so a repeated id would overwrite an earlier
+            // rejection; disambiguate rather than lose the record.
+            let mut key = rule.id.clone();
+            let mut nth = 2;
+            while rejected.contains_key(&key) {
+                key = format!("{} #{nth}", rule.id);
+                nth += 1;
+            }
+            rejected.insert(key, reason);
             continue;
         }
         rules.push(rule);
@@ -219,6 +237,21 @@ fn check_rule(rule: &SastRule) -> Result<(), String> {
         return Err(format!(
             "leaf pattern is {} bytes, exceeding the maximum of {MAX_PATTERN_BYTES}",
             text.len()
+        ));
+    }
+    // Cheap textual pre-filter for the O(n^k) ellipsis case. The authoritative
+    // per-sequence check is `PatternNode::validate`, which needs the compiled
+    // pattern and so runs in the front-end (T-702); this bounds the leaf before
+    // a parser ever sees it.
+    if let Some(text) = rule
+        .pattern
+        .leaf_texts()
+        .into_iter()
+        .find(|t| t.matches("...").count() > MAX_ELLIPSES_PER_SEQUENCE)
+    {
+        return Err(format!(
+            "leaf pattern has {} `...` items, exceeding the maximum of {MAX_ELLIPSES_PER_SEQUENCE}",
+            text.matches("...").count()
         ));
     }
     rule.pattern.validate().map_err(|e| e.to_string())
@@ -332,6 +365,67 @@ mod tests {
         let pack = parse_pack(&pack_json(rule)).unwrap();
         assert!(pack.rules.is_empty());
         assert!(pack.rejected["py.bare"].contains("sequence operator"));
+    }
+
+    #[test]
+    fn duplicate_rule_ids_are_rejected() {
+        // Rule id is an identity input (§7.7.2): duplicates would collide in
+        // the finding_id namespace.
+        let pack = parse_pack(&pack_json(&format!("{EVAL_RULE},{EVAL_RULE}"))).unwrap();
+        assert_eq!(pack.rules.len(), 1);
+        assert_eq!(pack.rejected.len(), 1);
+        assert!(pack.rejected.values().any(|r| r.contains("duplicate")));
+    }
+
+    #[test]
+    fn repeated_bad_ids_keep_separate_rejection_records() {
+        // `rejected` is keyed by id, so two bad rules sharing one must not
+        // overwrite each other — a silently shrinking record reads as coverage.
+        let bad = r#"{
+            "id": "py.dup",
+            "message": "m",
+            "languages": [],
+            "severity": "high",
+            "confidence": "heuristic",
+            "pattern": "eval($X)"
+        }"#;
+        let pack = parse_pack(&pack_json(&format!("{bad},{bad}"))).unwrap();
+        assert!(pack.rules.is_empty());
+        assert_eq!(pack.rejected.len(), 2, "both rejections recorded");
+    }
+
+    #[test]
+    fn out_of_subset_operator_alongside_a_valid_one_is_rejected() {
+        // The existing rejection tests present the bad operator alone. Serde's
+        // `flatten` disables deny_unknown_fields, so the coexisting case is
+        // guarded only by the flattened enum's single-key semantics — pin it,
+        // or a later refactor could start silently ignoring `fix`.
+        let rule = r#"{
+            "id": "py.fix",
+            "message": "m",
+            "languages": ["python"],
+            "severity": "high",
+            "confidence": "heuristic",
+            "pattern": "eval($X)",
+            "fix": "safe_eval($X)"
+        }"#;
+        assert!(
+            parse_pack(&pack_json(rule)).is_err(),
+            "autofix beside a valid pattern must still be rejected"
+        );
+    }
+
+    #[test]
+    fn ellipsis_heavy_leaf_text_is_rejected() {
+        // Textual pre-filter for the O(n^k) case, before a parser sees it.
+        let dots = ["..."; MAX_ELLIPSES_PER_SEQUENCE + 1].join(", ");
+        let rule = format!(
+            r#"{{"id":"py.dots","message":"m","languages":["python"],
+                 "severity":"high","confidence":"heuristic","pattern":"f({dots})"}}"#
+        );
+        let pack = parse_pack(&pack_json(&rule)).unwrap();
+        assert!(pack.rules.is_empty());
+        assert!(pack.rejected["py.dots"].contains("exceeding"));
     }
 
     #[test]

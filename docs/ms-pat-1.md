@@ -90,6 +90,32 @@ any run of statements, which is what makes `pattern-inside` useful.
 Ellipsis is a sequence operator, never a node: it may not be bound to a
 metavariable and may not appear as the entire leaf pattern.
 
+Adjacent ellipses (`..., ...`) are rejected at load: they are redundant — the
+pair is exactly `...` — and they multiply the search space for nothing. A single
+child sequence may contain at most **four** `...` items; matching a sequence
+with *k* ellipses against *n* siblings explores O(n^k) splits, and rule packs
+are external data.
+
+### First-solution semantics — a deliberate divergence from Semgrep
+
+MS-PAT-1 matching finds the **first** solution, not all of them, and does not
+backtrack across operator boundaries once a sub-match has succeeded:
+
+- ellipsis splits are tried **shortest-first**,
+- `pattern-either` takes the **first branch in declaration order** that matches,
+- a conjunction (`patterns`) threads the bindings the earlier operand produced;
+  if a later operand then fails, earlier choice points are **not** revisited.
+
+So `foo(..., $X, ...)` followed by a sibling `$X` binds `$X` to the *first*
+candidate and reports no match if the sibling disagrees, even where some other
+split would have satisfied both. Semgrep explores these; we do not.
+
+This is the "unless our documented semantics say otherwise" case from ADR 0014:
+a disagreement of this shape is **not** a matcher bug. It buys deterministic,
+bounded matching (`DET-001`) over untrusted input. If a translated corpus ever
+needs full multi-solution matching, that is its own ADR — the dropped-rule count
+is the signal.
+
 ### The placeholder convention
 
 `$X` is not valid Python or JavaScript, so a front-end cannot hand pattern text

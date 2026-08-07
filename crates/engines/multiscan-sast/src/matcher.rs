@@ -478,6 +478,42 @@ mod tests {
     }
 
     #[test]
+    fn first_solution_semantics_are_deliberate() {
+        // ms-pat-1 §3: matching finds the FIRST solution and does not revisit
+        // earlier choice points. Pattern children are `foo(..., $X, ...)` then
+        // a sibling `$X`; the tree is `foo(a, b)` then `b`.
+        //
+        // The ellipsis binds $X=a (shortest split first), the sibling $X then
+        // fails against `b`, and the split that would have worked ($X=b) is
+        // never tried. Semgrep would find it. This test pins that divergence so
+        // it stays a documented property rather than becoming an accident.
+        let tree = Node::leaf(Kind::Block)
+            .with_children(vec![call("foo", vec![ident("a"), ident("b")]), ident("b")]);
+        let expr = PatternExpr::Pattern(PatternNode::Node {
+            kind: Kind::Block,
+            name: None,
+            children: vec![
+                SeqItem::Node(p_call(
+                    "foo",
+                    vec![SeqItem::Ellipsis, p_arg(p_metavar("X")), SeqItem::Ellipsis],
+                )),
+                SeqItem::Node(p_metavar("X")),
+            ],
+        });
+
+        assert!(
+            matches(&expr, &tree).is_empty(),
+            "first-solution matching gives up rather than re-splitting (ms-pat-1 §3)"
+        );
+
+        // The same pattern against `foo(b, ...)` succeeds, confirming the
+        // failure above is the split choice and not a broken pattern.
+        let agreeable = Node::leaf(Kind::Block)
+            .with_children(vec![call("foo", vec![ident("b"), ident("c")]), ident("b")]);
+        assert_eq!(matches(&expr, &agreeable).len(), 1);
+    }
+
+    #[test]
     fn matching_is_reproducible() {
         // DET-001: same inputs, same bindings, every run.
         let tree = call("foo", vec![ident("a"), ident("b"), ident("c")]);
