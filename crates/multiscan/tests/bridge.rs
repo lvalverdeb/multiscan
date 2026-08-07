@@ -49,12 +49,13 @@ fn native_and_trivy_merge_into_one_corroborated_finding() {
         r#"{"lockfileVersion":3,"packages":{"":{"name":"app"},"node_modules/lodash":{"version":"4.17.20"}}}"#,
     )
     .unwrap();
-    // A Trivy report flagging the same package + advisory + lockfile — same
-    // identity, so it must merge with the native finding.
+    // A Trivy report flagging the same package + vulnerability + lockfile.
+    // Trivy reports the CVE, and native SCA keys on the canonical CVE
+    // (ADR 0012), so both share one identity and must merge.
     std::fs::write(
         project.path().join("trivy.json"),
         r#"{"SchemaVersion":2,"Results":[{"Target":"package-lock.json","Type":"npm",
-          "Vulnerabilities":[{"VulnerabilityID":"GHSA-35jh-r3h4-6jhm","PkgName":"lodash",
+          "Vulnerabilities":[{"VulnerabilityID":"CVE-2021-23337","PkgName":"lodash",
           "InstalledVersion":"4.17.20","FixedVersion":"4.17.21","Severity":"HIGH"}]}]}"#,
     )
     .unwrap();

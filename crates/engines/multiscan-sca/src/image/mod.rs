@@ -110,9 +110,11 @@ fn container_finding(
         );
     }
     RawFinding {
+        // ADR 0012: key on the canonical vulnerability id (CVE when present)
+        // so records sharing a CVE (a DSA and an RHSA, say) merge into one.
         identity: IdentityKey::ContainerVulnerability {
             purl: purl.to_string(),
-            advisory_id: advisory.id.clone(),
+            advisory_id: advisory.canonical_vuln_id(),
             image_digest: image_digest.to_string(),
         },
         title: advisory

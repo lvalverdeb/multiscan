@@ -159,7 +159,7 @@ fn scan_image_finds_vulnerable_os_package() {
     assert_eq!(arr.len(), 1, "expected one container vulnerability");
     let f = &arr[0];
     assert_eq!(f["identity"]["finding_class"], "container_vulnerability");
-    assert_eq!(f["identity"]["advisory_id"], "DSA-5169-1");
+    assert_eq!(f["identity"]["advisory_id"], "CVE-2022-2068");
     assert_eq!(
         f["identity"]["purl"],
         "pkg:deb/debian/openssl@1.1.1n-0+deb11u1"

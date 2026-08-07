@@ -6,7 +6,9 @@
     ],
     "PyPI": [
       {"id":"PYSEC-django-1","summary":"SQL injection in Django","database_specific":{"severity":"HIGH","cwe_ids":["CWE-89"]},"affected":[{"package":{"ecosystem":"PyPI","name":"Django"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"3.2"},{"fixed":"3.2.15"}]}]}]},
-      {"id":"PYSEC-redis-old","summary":"Old redis advisory with a git-commit fix and no ecosystem upper bound","affected":[{"package":{"ecosystem":"PyPI","name":"redis"},"versions":["4.3.4","4.4.0","5.0.0","6.4.0","7.0.0b3"],"ranges":[{"type":"GIT","events":[{"introduced":"0"},{"fixed":"4a7a4e42db8ff757cdf3f4a824f66426036034ef"}]},{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}
+      {"id":"PYSEC-redis-old","summary":"Old redis advisory with a git-commit fix and no ecosystem upper bound","affected":[{"package":{"ecosystem":"PyPI","name":"redis"},"versions":["4.3.4","4.4.0","5.0.0","6.4.0","7.0.0b3"],"ranges":[{"type":"GIT","events":[{"introduced":"0"},{"fixed":"4a7a4e42db8ff757cdf3f4a824f66426036034ef"}]},{"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]},
+      {"id":"GHSA-merge-demo","summary":"mergedemo vuln (GHSA record, high)","aliases":["CVE-2099-0001"],"database_specific":{"severity":"HIGH","cwe_ids":["CWE-79"]},"affected":[{"package":{"ecosystem":"PyPI","name":"mergedemo"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"2.0.0"}]}]}]},
+      {"id":"PYSEC-2099-merge","summary":"mergedemo vuln (PYSEC record, no severity)","aliases":["CVE-2099-0001"],"affected":[{"package":{"ecosystem":"PyPI","name":"mergedemo"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"2.0.0"}]}]}]}
     ],
     "Maven": [
       {"id":"GHSA-jfh8-c2jp-5v3q","summary":"Remote code execution in Log4j (Log4Shell)","aliases":["CVE-2021-44228"],"database_specific":{"severity":"CRITICAL","cwe_ids":["CWE-502"]},"affected":[{"package":{"ecosystem":"Maven","name":"org.apache.logging.log4j:log4j-core"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"2.0-beta9"},{"fixed":"2.15.0"}]}]}]}
@@ -19,7 +21,8 @@
     {"engine": "secrets", "key": "private-key-block", "path": "secrets/id_rsa"},
     {"engine": "sca", "key": "GHSA-lodash-1", "path": "deps/package-lock.json"},
     {"engine": "sca", "key": "PYSEC-django-1", "path": "deps/requirements.txt"},
-    {"engine": "sca", "key": "GHSA-jfh8-c2jp-5v3q", "path": "deps/pom.xml"},
+    {"engine": "sca", "key": "CVE-2099-0001", "path": "deps/requirements.txt"},
+    {"engine": "sca", "key": "CVE-2021-44228", "path": "deps/pom.xml"},
     {"engine": "iac", "key": "cis-docker-floating-base-tag", "path": "infra/Dockerfile"},
     {"engine": "iac", "key": "cis-docker-run-as-root", "path": "infra/Dockerfile"},
     {"engine": "iac", "key": "cis-docker-secret-in-env", "path": "infra/Dockerfile"},

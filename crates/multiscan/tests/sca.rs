@@ -74,7 +74,7 @@ fn vulnerable_lockfile_resolves_offline() {
     let findings = findings.as_array().unwrap();
     assert_eq!(findings.len(), 1, "expected one advisory match");
     let f = &findings[0];
-    assert_eq!(f["identity"]["advisory_id"], "GHSA-35jh-r3h4-6jhm");
+    assert_eq!(f["identity"]["advisory_id"], "CVE-2021-23337");
     assert_eq!(f["remediation"]["fixed_version"], "4.17.21");
     assert_eq!(f["remediation"]["fix_available"], true);
     assert_eq!(f["severity"], "high");
@@ -216,7 +216,7 @@ dependencies = [
         "expected the Django advisory: {findings:?}"
     );
     let f = &findings[0];
-    assert_eq!(f["identity"]["advisory_id"], "PYSEC-2022-1");
+    assert_eq!(f["identity"]["advisory_id"], "CVE-2022-34265");
     assert_eq!(f["remediation"]["fixed_version"], "3.2.15");
     assert_eq!(f["asset"]["identifier"], "pkg:pypi/django@3.2.14");
 }
@@ -266,7 +266,7 @@ fn yarn_lock_resolves_npm_advisory() {
     .unwrap();
     let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(advisory_ids(&findings), vec!["GHSA-35jh-r3h4-6jhm"]);
+    assert_eq!(advisory_ids(&findings), vec!["CVE-2021-23337"]);
 }
 
 /// go.sum resolves Go advisories: `v` prefix stripped, SemVer ordering.
@@ -362,7 +362,7 @@ fn manifest_fallback_resolves_pinned_advisory() {
     .unwrap();
     let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(advisory_ids(&findings), vec!["GHSA-35jh-r3h4-6jhm"]);
+    assert_eq!(advisory_ids(&findings), vec!["CVE-2021-23337"]);
 }
 
 /// A range declaration is never silently skipped: it surfaces as the SCA-001
@@ -510,4 +510,48 @@ fn gradle_lockfile_resolves_maven_advisory() {
     let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(advisory_ids(&findings), vec!["GHSA-logback-1"]);
+}
+
+/// ADR 0012: two advisory records (a GHSA and a PYSEC) that share a CVE
+/// collapse into ONE finding keyed on the CVE, at the higher severity, with
+/// both record ids preserved in evidence.
+#[test]
+fn same_cve_advisories_merge_into_one_finding() {
+    let cache = tempfile::tempdir().unwrap();
+    let ghsa = r#"{"id":"GHSA-aaaa-bbbb-cccc","summary":"widget RCE","aliases":["CVE-2099-1234"],"database_specific":{"severity":"HIGH","cwe_ids":["CWE-94"]},"affected":[{"package":{"ecosystem":"npm","name":"widget"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"2.0.0"}]}]}]}"#;
+    // Same CVE, no severity (would default to medium) — must not appear separately.
+    let pysec = r#"{"id":"PYSEC-2099-1","summary":"widget RCE (pysec)","aliases":["CVE-2099-1234"],"affected":[{"package":{"ecosystem":"npm","name":"widget"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"2.0.0"}]}]}]}"#;
+    seed_ecosystems(cache.path(), &[("npm", &format!("{ghsa}\n{pysec}"))]);
+
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package-lock.json"),
+        r#"{"lockfileVersion":3,"packages":{"":{"name":"app"},"node_modules/widget":{"version":"1.0.0"}}}"#,
+    )
+    .unwrap();
+
+    let (out, findings) = scan_json(cache.path(), project.path(), &["--offline"]);
+    assert_eq!(out.status.code(), Some(0));
+    let arr = findings.as_array().unwrap();
+    // Exactly one finding for widget, keyed on the CVE, at HIGH severity.
+    let widget: Vec<_> = arr
+        .iter()
+        .filter(|f| f["asset"]["identifier"] == "pkg:npm/widget@1.0.0")
+        .collect();
+    assert_eq!(widget.len(), 1, "GHSA + PYSEC of one CVE must be one finding: {widget:?}");
+    let f = widget[0];
+    assert_eq!(f["identity"]["advisory_id"], "CVE-2099-1234");
+    assert_eq!(f["severity"], "high", "merged finding takes the max severity");
+    // Both constituent OSV records appear as sources (dedup by shared CVE).
+    let rules: Vec<String> = f["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["rule_id"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        rules.contains(&"GHSA-aaaa-bbbb-cccc".to_string())
+            && rules.contains(&"PYSEC-2099-1".to_string()),
+        "both records as sources: {rules:?}"
+    );
 }

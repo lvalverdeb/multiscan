@@ -394,8 +394,8 @@ Required importers: SARIF 2.1.0 (generic), Trivy JSON, Semgrep JSON, Checkov JSO
 
 | `finding_class` | Identity tuple fields (after `finding_class`) |
 |---|---|
-| `VulnerableDependency` | package purl (type, namespace, name, version), advisory ID, normalized lockfile/manifest path |
-| `ContainerVulnerability` | package purl (type, namespace, name, version), advisory ID, image digest |
+| `VulnerableDependency` | package purl (type, namespace, name, version), canonical vulnerability id (CVE alias if the advisory carries one, else advisory ID — ADR 0012), normalized lockfile/manifest path |
+| `ContainerVulnerability` | package purl (type, namespace, name, version), canonical vulnerability id (as above, ADR 0012), image digest |
 | `ExposedSecret` | rule ID, normalized path, truncated secret fingerprint |
 | `IacMisconfiguration` | policy ID, normalized path, resource address |
 | `WebExposure` | template ID, normalized origin (scheme + host + port), matched request path |

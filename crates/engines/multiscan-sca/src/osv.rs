@@ -78,6 +78,18 @@ pub struct Match {
 }
 
 impl Advisory {
+    /// The canonical vulnerability id for identity and dedup (ADR 0012): the
+    /// smallest CVE alias when the advisory carries one, else the advisory's
+    /// own id. Records that share a CVE — typically a GHSA and a PYSEC — thus
+    /// share one identity and merge downstream into a single finding (max
+    /// severity, both records as sources), instead of duplicating.
+    pub fn canonical_vuln_id(&self) -> String {
+        self.cve_aliases()
+            .into_iter()
+            .min()
+            .unwrap_or_else(|| self.id.clone())
+    }
+
     /// The CVE alias, if any, for KEV/EPSS enrichment.
     pub fn cve_aliases(&self) -> Vec<String> {
         self.aliases

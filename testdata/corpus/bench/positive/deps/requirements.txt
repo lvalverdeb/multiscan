@@ -1,2 +1,6 @@
 Django==3.2.14
 requests==2.31.0
+# Matched by a GHSA and a PYSEC record that share CVE-2099-0001 — must
+# collapse into ONE finding keyed on the CVE (ADR 0012), at the higher
+# (GHSA/high) severity, not two.
+mergedemo==1.0.0

@@ -404,9 +404,14 @@ impl ScaEngine {
             }
 
             sink.emit(RawFinding {
+                // ADR 0012: identity is keyed on the canonical vulnerability id
+                // (CVE when present), so a GHSA and a PYSEC of one CVE share a
+                // finding_id and the dedup pass merges them into one finding
+                // (max severity, both records as sources). `rule_id` keeps the
+                // actual OSV record so each still appears as a distinct source.
                 identity: IdentityKey::VulnerableDependency {
                     purl: package.purl(),
-                    advisory_id: advisory.id.clone(),
+                    advisory_id: advisory.canonical_vuln_id(),
                     manifest_path: manifest_path.to_string(),
                 },
                 title: advisory

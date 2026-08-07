@@ -97,7 +97,7 @@ fn sbom_lists_components_and_vulnerabilities() {
     // The vulnerable package produces a vulnerability entry (OUT-001).
     let vulns = doc["vulnerabilities"].as_array().unwrap();
     assert_eq!(vulns.len(), 1);
-    assert_eq!(vulns[0]["id"], "GHSA-35jh-r3h4-6jhm");
+    assert_eq!(vulns[0]["id"], "CVE-2021-23337");
     assert_eq!(vulns[0]["affects"][0]["ref"], "pkg:npm/lodash@4.17.20");
     assert_eq!(vulns[0]["ratings"][0]["severity"], "high");
 

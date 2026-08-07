@@ -10,7 +10,7 @@ use std::process::{Command, Output};
 use chrono::Utc;
 use multiscan_feeds::{write_snapshot, SnapshotCounts, SnapshotData};
 
-const ADVISORY: &str = r#"{"id":"GHSA-35jh-r3h4-6jhm","summary":"Command injection","aliases":["CVE-2021-23337"],"database_specific":{"severity":"HIGH"},"affected":[{"package":{"ecosystem":"npm","name":"lodash"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"4.17.21"}]}]}]}"#;
+const ADVISORY: &str = r#"{"id":"CVE-2021-23337","summary":"Command injection","aliases":["CVE-2021-23337"],"database_specific":{"severity":"HIGH"},"affected":[{"package":{"ecosystem":"npm","name":"lodash"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"4.17.21"}]}]}]}"#;
 
 fn seed(cache: &Path) {
     let mut osv = BTreeMap::new();
@@ -132,6 +132,6 @@ fn airgap_export_import_scan_identical() {
     assert_eq!(findings.as_array().unwrap().len(), 1);
     assert_eq!(
         findings[0]["identity"]["advisory_id"],
-        "GHSA-35jh-r3h4-6jhm"
+        "CVE-2021-23337"
     );
 }

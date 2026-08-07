@@ -20,6 +20,7 @@ rewrite.
 | [0009](0009-ignore-files.md) | Ignore-file support (`.multiscanignore`, opt-in `.gitignore`) | Accepted | Extends §4.5 / §7 discovery; realizes FP-005 |
 | [0010](0010-rule-pack-distribution.md) | Rule-pack distribution through the feed channel | Accepted | Extends §7.2/§10 (secrets, IaC, probe packs) |
 | [0011](0011-history-flag-amends-sec-104.md) | Amend SEC-104 — `--history` over all reachable objects | Accepted | **Amends** SEC-104 (§7.2) |
+| [0012](0012-canonical-vulnerability-identity.md) | Canonical vulnerability identity — merge advisory records by CVE | Accepted | **Amends** §7.7.2 identity tuples |
 
 ## Conventions
 
