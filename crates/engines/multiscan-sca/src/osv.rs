@@ -119,10 +119,23 @@ impl Advisory {
                     fixed_version: lowest_fix(affected, version, scheme),
                 });
             }
-            // Range events.
+            // Range events. An *unbounded* range (an `introduced` with no
+            // `fixed`/`last_affected` upper bound) marks every later version
+            // affected. When the advisory ALSO enumerates explicit `versions`,
+            // that enumeration is authoritative: a version absent from it
+            // (already checked above) is not affected, and the unbounded range
+            // is treated as a degenerate shadow — commonly the ECOSYSTEM
+            // projection of a GIT-commit fix OSV could not map to a version.
+            // This prevents a fixed package from matching an old advisory
+            // forever (FR-003/SCA-001 intent). A range with any upper bound
+            // always applies, and an unbounded range with no `versions` list
+            // still matches (a genuinely unfixed vulnerability stays caught).
             for range in &affected.ranges {
                 if range.range_type == "GIT" {
                     continue; // commit ranges are not version-comparable here
+                }
+                if !affected.versions.is_empty() && range_is_unbounded(range) {
+                    continue;
                 }
                 if in_range(range, version, scheme) {
                     return Some(Match {
@@ -160,6 +173,17 @@ fn normalize_pypi(name: &str) -> String {
         }
     }
     out
+}
+
+/// A range with no upper bound: it has `introduced` events but no `fixed` and
+/// no `last_affected`, so it marks every version at or after `introduced`
+/// affected with no termination. Such a range is deferred to an explicit
+/// `versions` enumeration when the advisory provides one.
+fn range_is_unbounded(range: &Range) -> bool {
+    range
+        .events
+        .iter()
+        .all(|e| e.fixed.is_none() && e.last_affected.is_none())
 }
 
 /// Evaluate one range against a version using OSV interval semantics: sort
@@ -269,6 +293,47 @@ mod tests {
         assert!(adv.matches("npm", "lodash", "4.17.21").is_none());
         // Double-digit patch below the fix still matches (not a string compare).
         assert!(adv.matches("npm", "lodash", "4.17.9").is_some());
+    }
+
+    #[test]
+    fn unbounded_range_defers_to_versions_enumeration() {
+        // The redis PYSEC-2022-43162 shape: an ECOSYSTEM range `introduced: 0`
+        // with no upper bound, plus an explicit `versions` list. A version
+        // absent from the list must NOT match (the false positive), while a
+        // version in the list still matches.
+        let adv = advisory(
+            r#"{"id":"PYSEC-x","affected":[{"package":{"ecosystem":"PyPI","name":"redis"},
+            "versions":["4.3.4","4.4.0","6.4.0"],
+            "ranges":[{"type":"GIT","events":[{"introduced":"0"},{"fixed":"abc123"}]},
+                      {"type":"ECOSYSTEM","events":[{"introduced":"0"}]}]}]}"#,
+        );
+        assert!(adv.matches("PyPI", "redis", "8.0.1").is_none(), "unbounded range must defer to the versions list");
+        assert!(adv.matches("PyPI", "redis", "6.4.0").is_some(), "an enumerated version still matches");
+    }
+
+    #[test]
+    fn unbounded_range_still_matches_without_versions_list() {
+        // No `versions` enumeration: a genuinely unfixed vulnerability with an
+        // open-ended range must still be caught (recall preserved).
+        let adv = advisory(
+            r#"{"id":"PYSEC-y","affected":[{"package":{"ecosystem":"PyPI","name":"foo"},
+            "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"1.0"}]}]}]}"#,
+        );
+        assert!(adv.matches("PyPI", "foo", "9.9.9").is_some());
+        assert!(adv.matches("PyPI", "foo", "0.9.0").is_none());
+    }
+
+    #[test]
+    fn bounded_range_matches_version_not_in_enumeration() {
+        // The deep-translator counter-case: a version in a *bounded* range but
+        // not enumerated must still match (no false negative).
+        let adv = advisory(
+            r#"{"id":"PYSEC-z","affected":[{"package":{"ecosystem":"PyPI","name":"bar"},
+            "versions":["1.0","1.1"],
+            "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"1.0"},{"fixed":"1.3"}]}]}]}"#,
+        );
+        assert!(adv.matches("PyPI", "bar", "1.2.5").is_some(), "bounded range covers a non-enumerated in-range version");
+        assert!(adv.matches("PyPI", "bar", "1.3").is_none());
     }
 
     #[test]

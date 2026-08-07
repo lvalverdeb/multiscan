@@ -1,2 +1,5 @@
 Django==3.2.15
 requests==2.31.0
+# redis 8.0.1 vs an old advisory (introduced:0, no fix) whose enumerated
+# affected versions stop at 7.x — must NOT match (unbounded-range FP guard).
+redis==8.0.1
