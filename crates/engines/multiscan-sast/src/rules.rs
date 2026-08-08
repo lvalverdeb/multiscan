@@ -113,12 +113,23 @@ impl RawPatternExpr {
     }
 }
 
+/// Where a pack, or one rule in it, came from.
+///
+/// ADR 0014 decision 3 requires the translator to stamp this, and decision 4
+/// requires the licence audit result to ride along with the content. Carried
+/// as free-form data because it is provenance, not behaviour: nothing here
+/// affects matching.
+pub type Provenance = serde_json::Map<String, serde_json::Value>;
+
 /// One MS-PAT-1 rule.
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SastRule {
     /// Stable rule id — an identity input (§7.7.2).
     pub id: String,
+    /// Upstream source, licence and translation date, when translated.
+    #[serde(default)]
+    pub provenance: Option<Provenance>,
     /// Human-readable finding message.
     pub message: String,
     /// Languages this rule applies to.
@@ -142,6 +153,9 @@ pub struct SastPack {
     pub version: String,
     /// blake3 digest of the pack bytes, for `RuleSetRef` provenance.
     pub digest: String,
+    /// Corpus source, licence audit result and translation date, when the pack
+    /// was mechanically translated (ADR 0014 decisions 3 and 4).
+    pub provenance: Option<Provenance>,
     /// Rules, in pack order — iteration order is the pack's, never the
     /// filesystem's (`DET-001`).
     pub rules: Vec<SastRule>,
@@ -157,6 +171,8 @@ pub struct SastPack {
 struct PackFile {
     pack_id: String,
     version: String,
+    #[serde(default)]
+    provenance: Option<Provenance>,
     #[serde(default)]
     rules: Vec<SastRule>,
 }
@@ -213,6 +229,7 @@ pub fn parse_pack(bytes: &[u8]) -> Result<SastPack, PackError> {
         id: parsed.pack_id,
         version: parsed.version,
         digest,
+        provenance: parsed.provenance,
         rules,
         rejected,
     })

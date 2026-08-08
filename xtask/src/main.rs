@@ -11,6 +11,7 @@ mod gen;
 mod golden;
 mod offline;
 mod purity;
+mod translate_rules;
 mod util;
 
 use anyhow::Result;
@@ -57,6 +58,28 @@ enum Cmd {
     },
     /// No-I/O purity check for core/dedup/risk + lint-inheritance check (spec 5.2)
     Purity,
+    /// Translate a community Semgrep corpus into an MS-PAT-1 pack (ADR 0014).
+    ///
+    /// Dev tooling, never a shipped Engine capability: MultiScan consumes a
+    /// community corpus, it does not author one (§1.2). The licence check is
+    /// blocking.
+    TranslateRules {
+        /// Corpus root to walk for .yaml/.yml rule files
+        #[arg(long)]
+        from: std::path::PathBuf,
+        /// Upstream source, recorded in provenance (e.g. the repo URL)
+        #[arg(long)]
+        source: String,
+        /// SPDX licence of the corpus; must permit redistribution
+        #[arg(long)]
+        license: String,
+        /// Where to write the pack
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Translation date stamped into provenance (DET-004: injected, not read)
+        #[arg(long)]
+        date: String,
+    },
     /// Full CI ladder: gen --check, fmt, clippy, purity, test, golden,
     /// determinism, safety, offline, cargo-deny
     Ci,
@@ -72,6 +95,19 @@ fn main() -> Result<()> {
         Cmd::Bench => bench::run(),
         Cmd::BenchDetect { check } => bench_detect::run(check),
         Cmd::Purity => purity::run(),
+        Cmd::TranslateRules {
+            from,
+            source,
+            license,
+            out,
+            date,
+        } => translate_rules::run(
+            from,
+            source,
+            license,
+            out.unwrap_or_else(translate_rules::default_out),
+            date,
+        ),
         Cmd::Ci => ci(),
     }
 }
