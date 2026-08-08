@@ -26,11 +26,22 @@ pub const MAX_PATTERN_DEPTH: usize = 64;
 
 /// Maximum `...` items in a single child sequence.
 ///
-/// Matching a sequence with *k* ellipses against *n* siblings explores O(n^k)
-/// splits. Depth caps do not bound *k*, so a feed-delivered pack could
-/// otherwise hang a scan with one wide rule. Real Semgrep rules use one or two;
-/// four is generous. Exceeding it is a load rejection, not a runtime hang.
-pub const MAX_ELLIPSES_PER_SEQUENCE: usize = 4;
+/// Originally 4, chosen as a proxy bound on the O(n^k) split explosion before
+/// anything capped *n*. `MAX_MATCH_STEPS` (`T-704`) now bounds the actual work
+/// at match time, and exhausting it degrades the file to `Partial` rather than
+/// hanging — so this is a sanity limit, no longer the safety mechanism.
+///
+/// Raised to 8 on evidence: translating GitLab's MIT-licensed corpus showed
+/// real community rules using 5–8 ellipses (Flask path-traversal and
+/// open-redirect patterns among them), and at 4 the cap rejected 27 of them at
+/// load.
+///
+/// Measured honestly, this recovered **no additional working rules**: all 27
+/// then failed to compile for a different reason (they are multi-statement
+/// patterns — see `docs/ms-pat-1.md` §3). The raise stands because the cap was
+/// guarding something `MAX_MATCH_STEPS` now guards properly, not because it
+/// bought coverage today.
+pub const MAX_ELLIPSES_PER_SEQUENCE: usize = 8;
 
 /// An item in a pattern's child sequence.
 #[derive(Clone, PartialEq, Eq, Debug)]

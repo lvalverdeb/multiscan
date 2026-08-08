@@ -1,6 +1,6 @@
 # ADR 0017: The risk formula gains a sixth factor — module-level reachability
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-08
 - Amends: §8 (risk formula, NORMATIVE) and `FR-008`; realizes `FR-017` and
   `RSK-006`. Implements the reachability workstream ADR 0013 scoped.
@@ -37,8 +37,9 @@ package whose module is never imported scored the same as one on the hot path.
    The spread is deliberately narrow. At module granularity `Referenced` means
    "the package is imported", not "the vulnerable symbol is called" — weaker
    evidence, so the factor nudges rank rather than dominating it (ADR 0013,
-   consequences). **These specific numbers are a product calibration, which is
-   why this ADR is `Proposed` rather than `Accepted`.**
+   consequences). **These specific numbers are a product calibration rather
+   than a derivation, which is why they were put to the user rather than
+   self-accepted; they were ratified on 2026-08-08.**
 
 3. **`Unknown` is neutral, never pessimistic.** It must not behave like
    `NotReferenced`: suppressing a real Finding because the parser did not

@@ -73,6 +73,11 @@ enum Cmd {
         /// SPDX licence of the corpus; must permit redistribution
         #[arg(long)]
         license: String,
+        /// Path to the corpus LICENSE file. Required: its text and copyright
+        /// notice ride in the pack, because every admissible licence demands
+        /// attribution and an SPDX id alone does not provide it.
+        #[arg(long)]
+        license_file: std::path::PathBuf,
         /// Where to write the pack
         #[arg(long)]
         out: Option<std::path::PathBuf>,
@@ -99,12 +104,14 @@ fn main() -> Result<()> {
             from,
             source,
             license,
+            license_file,
             out,
             date,
         } => translate_rules::run(
             from,
             source,
             license,
+            license_file,
             out.unwrap_or_else(translate_rules::default_out),
             date,
         ),

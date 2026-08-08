@@ -98,6 +98,7 @@ pub fn run(
     from: PathBuf,
     source: String,
     license: String,
+    license_file: PathBuf,
     out: PathBuf,
     now: String,
 ) -> Result<()> {
@@ -110,6 +111,19 @@ pub fn run(
              Commons Clause restriction is exactly what it exists to catch.",
             REDISTRIBUTABLE.join(", ")
         );
+    }
+
+    // Every licence on the list requires the copyright notice and licence text
+    // to travel with derived content. An SPDX id is identification, not
+    // attribution, so the text is mandatory and rides in the pack.
+    let license_text = std::fs::read_to_string(&license_file).with_context(|| {
+        format!(
+            "reading the corpus LICENSE at {} — attribution is required, not optional",
+            license_file.display()
+        )
+    })?;
+    if license_text.trim().is_empty() {
+        bail!("the corpus LICENSE file is empty; attribution cannot be satisfied");
     }
 
     let mut kept: Vec<serde_json::Value> = Vec::new();
@@ -130,7 +144,17 @@ pub fn run(
                 path.extension().and_then(|e| e.to_str()),
                 Some("yaml") | Some("yml")
             ) {
-                yaml_paths.push(path);
+                // Semgrep corpora ship `*.test.yaml` fixtures beside the rules:
+                // multi-document YAML that is not a rule file at all. Counting
+                // them as drops would inflate the dropped total with files that
+                // were never candidates.
+                let is_test_fixture = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s.ends_with(".test"));
+                if !is_test_fixture {
+                    yaml_paths.push(path);
+                }
             }
         }
     }
@@ -175,6 +199,9 @@ pub fn run(
         "provenance": {
             "source": source,
             "license": license,
+            // Carried verbatim so redistribution satisfies the attribution
+            // clause every licence on the admissible list contains.
+            "license_text": license_text,
             "translated_at": now,
             "files_read": files,
             "rules_kept": kept.len(),
@@ -482,10 +509,12 @@ mod tests {
     #[test]
     fn a_non_redistributable_licence_is_a_blocking_error() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("LICENSE"), "irrelevant").unwrap();
         let err = run(
             dir.path().to_path_buf(),
             "src".into(),
             "Commons-Clause".into(),
+            dir.path().join("LICENSE"),
             dir.path().join("out.json"),
             "2026-08-08".into(),
         )
@@ -498,6 +527,11 @@ mod tests {
     #[test]
     fn translation_is_deterministic_and_records_drops() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("LICENSE"),
+            "MIT License\n\nCopyright (c) test\n",
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("rules.yaml"),
             r#"
@@ -533,6 +567,7 @@ rules:
             dir.path().to_path_buf(),
             "https://example.test/rules".into(),
             "MIT".into(),
+            dir.path().join("LICENSE"),
             out.clone(),
             "2026-08-08".into(),
         )
@@ -559,6 +594,11 @@ rules:
     fn an_empty_result_is_an_error_not_an_empty_pack() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
+            dir.path().join("LICENSE"),
+            "MIT License\n\nCopyright (c) test\n",
+        )
+        .unwrap();
+        std::fs::write(
             dir.path().join("r.yaml"),
             "rules:\n  - id: x\n    message: m\n    languages: [go]\n    severity: ERROR\n    pattern: f()\n",
         )
@@ -567,6 +607,7 @@ rules:
             dir.path().to_path_buf(),
             "s".into(),
             "MIT".into(),
+            dir.path().join("LICENSE"),
             dir.path().join("out.json"),
             "t".into(),
         )
@@ -584,6 +625,11 @@ mod round_trip {
     #[test]
     fn a_translated_pack_loads_and_compiles_in_the_engine() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("LICENSE"),
+            "MIT License\n\nCopyright (c) test\n",
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("rules.yaml"),
             r#"
@@ -609,6 +655,7 @@ rules:
             dir.path().to_path_buf(),
             "https://example.test/rules".into(),
             "MIT".into(),
+            dir.path().join("LICENSE"),
             out.clone(),
             "2026-08-08".into(),
         )
