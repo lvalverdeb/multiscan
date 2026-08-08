@@ -218,6 +218,145 @@ pub enum LowerError {
         /// The cap.
         max: usize,
     },
+    /// The parse exceeded [`PARSE_TIMEOUT`] and was abandoned (Q-12).
+    #[error("parse exceeded the {budget:?} budget and was abandoned")]
+    Timeout {
+        /// The budget that was exceeded.
+        budget: std::time::Duration,
+    },
+    /// Too many parses timed out; this language was abandoned for the scan.
+    #[error("skipped: {count} parse timeout(s) already; this language is abandoned for this scan")]
+    LanguageAbandoned {
+        /// Timeouts observed before giving up.
+        count: usize,
+    },
+}
+
+/// Wall-clock budget for parsing one file.
+///
+/// Exists because `swc`'s TypeScript grammar backtracks exponentially: a
+/// 203-byte file did not finish parsing in ten minutes (Q-12, reproducers in
+/// `testdata/corpus/sast-pathological/`). Nothing else bounds it — the input is
+/// 203 bytes, so size caps are irrelevant, and `ScanContext`'s deadline and
+/// cancel flag are only read *between* files, so control never returns.
+///
+/// Five seconds is roughly 300× the slowest legitimate *whole-corpus* parse
+/// measured for ADR 0015 (554k LOC of Python in 117 ms). No real single file
+/// approaches it.
+pub const PARSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How many timeouts a language gets before it is abandoned for the scan.
+///
+/// A timed-out worker cannot be killed — Rust has no such mechanism — so it is
+/// abandoned and keeps burning a core until it finishes, which for the
+/// pathological input may be never. Without this cap, a repo full of such files
+/// would spawn one zombie per file. With it, the damage is bounded at
+/// [`MAX_PARSE_TIMEOUTS`] leaked threads per language regardless of repo
+/// contents.
+pub const MAX_PARSE_TIMEOUTS: usize = 3;
+
+/// Lower source in the given language, unbounded.
+///
+/// Prefer [`lower_bounded`] for scanned files: this can run arbitrarily long on
+/// adversarial input.
+pub fn lower(source: &str, language: crate::rules::Language) -> Result<Node, LowerError> {
+    match language {
+        crate::rules::Language::Python => python::lower_source(source),
+        crate::rules::Language::Javascript => javascript::lower_source(source, false),
+        crate::rules::Language::Typescript => javascript::lower_source(source, true),
+    }
+}
+
+/// Tracks parse timeouts across one scan, so the abandoned-thread count stays
+/// bounded (see [`MAX_PARSE_TIMEOUTS`]).
+///
+/// Deliberately not `Sync`: each call site drives its own file loop, and
+/// sharing one across threads would make which files get skipped depend on
+/// scheduling.
+#[derive(Debug, Default)]
+pub struct ParseBudget {
+    python: usize,
+    javascript: usize,
+}
+
+impl ParseBudget {
+    /// A fresh budget with no timeouts recorded.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn count(&mut self, language: crate::rules::Language) -> &mut usize {
+        match language {
+            crate::rules::Language::Python => &mut self.python,
+            // TypeScript rides the JavaScript front-end, so they share a fate:
+            // the grammar that blows up is the one being abandoned.
+            _ => &mut self.javascript,
+        }
+    }
+
+    /// Whether this language has been abandoned for the rest of the scan.
+    pub fn is_abandoned(&mut self, language: crate::rules::Language) -> bool {
+        *self.count(language) >= MAX_PARSE_TIMEOUTS
+    }
+
+    /// Total timeouts seen, for the degradation reason.
+    pub fn timeouts(&self) -> usize {
+        self.python + self.javascript
+    }
+}
+
+/// Lower source with a wall-clock bound, abandoning the parse if it overruns.
+///
+/// The parse runs on a worker thread and is **abandoned, never killed**, on
+/// timeout — Rust cannot kill a thread. The worker keeps running until it
+/// finishes; [`MAX_PARSE_TIMEOUTS`] is what stops that from unbounded growth.
+///
+/// A timed-out file yields no tree, exactly as a parse error does, so the
+/// finding set is unaffected either way. The caller must still degrade the
+/// scan outcome — a file we failed to read cannot close findings (§7.7.4).
+pub fn lower_bounded(
+    source: &str,
+    language: crate::rules::Language,
+    budget: &mut ParseBudget,
+) -> Result<Node, LowerError> {
+    if budget.is_abandoned(language) {
+        return Err(LowerError::LanguageAbandoned {
+            count: *budget.count(language),
+        });
+    }
+
+    // Reject oversize input before spawning: no point paying for a thread to
+    // learn what a length check already knows.
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(LowerError::TooLarge {
+            size: source.len(),
+            max: MAX_SOURCE_BYTES,
+        });
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let owned = source.to_string();
+    // The worker is detached deliberately: on timeout there is nothing to join.
+    std::thread::spawn(move || {
+        // A closed channel means the caller already gave up; the send fails
+        // harmlessly and the thread exits.
+        let _ = tx.send(lower(&owned, language));
+    });
+
+    match rx.recv_timeout(PARSE_TIMEOUT) {
+        Ok(result) => result,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            *budget.count(language) += 1;
+            Err(LowerError::Timeout {
+                budget: PARSE_TIMEOUT,
+            })
+        }
+        // The worker panicked. Engines must not abort a scan on one bad file.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(LowerError::Parse {
+            language: "unknown",
+            detail: "parser worker terminated unexpectedly".to_string(),
+        }),
+    }
 }
 
 #[cfg(test)]

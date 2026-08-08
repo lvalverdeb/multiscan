@@ -320,6 +320,9 @@ impl Engine for SastEngine {
         let files = find_files(&ctx.root, &ctx.excludes);
         let total = files.len() as u64;
         let mut scanned = 0u64;
+        // Q-12: parsing is wall-clock bounded, and a language that keeps
+        // timing out is abandoned for the rest of the scan.
+        let mut parse_budget = lang::ParseBudget::new();
         // A pack that only partly compiled means this run cannot close
         // anything: rules the pack declares were not applied, so their absence
         // from the output is not evidence they no longer match (§7.7.4).
@@ -348,17 +351,13 @@ impl Engine for SastEngine {
                 continue;
             };
 
-            let parsed = match language {
-                Language::Python => lang::python::lower_source(&text),
-                Language::Javascript => lang::javascript::lower_source(&text, false),
-                Language::Typescript => lang::javascript::lower_source(&text, true),
-            };
-            let tree = match parsed {
+            let tree = match lang::lower_bounded(&text, language, &mut parse_budget) {
                 Ok(tree) => tree,
                 Err(e) => {
-                    // A file that does not parse degrades the scan to Partial
-                    // rather than aborting it — and Partial cannot close
-                    // findings, so a syntax error never marks anything fixed.
+                    // A file that does not parse — malformed, oversize, or
+                    // over the time budget — degrades the scan to Partial
+                    // rather than aborting it. Partial cannot close findings,
+                    // so an unread file never marks anything fixed (§7.7.4).
                     degraded = Some(format!("{rel}: {e}"));
                     continue;
                 }

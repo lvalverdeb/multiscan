@@ -68,6 +68,10 @@ impl Index {
         let mut js_seen = false;
         let mut python_ok = true;
         let mut js_ok = true;
+        // Q-12: the same wall-clock bound the engine uses. A parse that
+        // overruns here would otherwise hang the whole scan before any
+        // dependency finding is scored.
+        let mut parse_budget = multiscan_sast::lang::ParseBudget::new();
 
         for (abs, _rel, language) in multiscan_sast::discover(root, excludes) {
             match language {
@@ -101,14 +105,7 @@ impl Index {
                 mark_untrusted(&mut python_ok, &mut js_ok);
                 continue;
             };
-            let parsed = match language {
-                Language::Python => multiscan_sast::lang::python::lower_source(&text),
-                Language::Javascript => {
-                    multiscan_sast::lang::javascript::lower_source(&text, false)
-                }
-                Language::Typescript => multiscan_sast::lang::javascript::lower_source(&text, true),
-            };
-            match parsed {
+            match multiscan_sast::lang::lower_bounded(&text, language, &mut parse_budget) {
                 Ok(tree) => imports.extend(imports::extract(&tree, language)),
                 Err(_) => mark_untrusted(&mut python_ok, &mut js_ok),
             }

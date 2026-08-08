@@ -245,3 +245,46 @@ fn findings_are_deterministic_across_runs() {
         );
     }
 }
+
+/// Q-12 / ADR 0018 at the CLI boundary: a repo containing the pathological
+/// TypeScript file must still finish.
+///
+/// Before the parse bound this scan did not terminate — a 203-byte file
+/// committed to a repository hung any scan of it.
+#[test]
+fn a_repo_containing_the_pathological_file_still_terminates() {
+    let cache = tempfile::tempdir().unwrap();
+    seed(
+        cache.path(),
+        Some(pack_json("1.0.0", "py.eval", "eval($X)")),
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let reproducer = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/corpus/sast-pathological/ts-backtrack-4-unbounded.ts");
+    std::fs::copy(&reproducer, dir.path().join("evil.ts")).unwrap();
+    // A healthy file alongside it, so we can prove the scan kept working.
+    std::fs::write(dir.path().join("app.py"), "eval(user_input)\n").unwrap();
+
+    let start = std::time::Instant::now();
+    let (out, value) = scan(cache.path(), dir.path(), &[]);
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < std::time::Duration::from_secs(60),
+        "scan took {elapsed:?} — the parse bound did not hold end to end"
+    );
+
+    // The healthy file was still scanned and still reported.
+    let findings = structural_findings(&value);
+    assert_eq!(findings.len(), 1, "the Python file must still be scanned");
+    assert_eq!(findings[0]["location"]["path"], "app.py");
+
+    // And the scan says so: a file it could not read degrades the outcome,
+    // so nothing gets closed on the strength of an incomplete run (§7.7.4).
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "an abandoned parse must degrade the scan, not pass silently"
+    );
+}

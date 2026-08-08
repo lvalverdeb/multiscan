@@ -1,6 +1,8 @@
-# Pathological TypeScript inputs — a known, unfixed limitation
+# Pathological TypeScript inputs — contained by ADR 0018
 
-**These files are not fixtures for a passing test.** They are reproducers for a
+**These now back a passing test** (`crates/engines/multiscan-sast/tests/parse_timeout.rs`):
+each must be *abandoned* within the parse budget rather than allowed to run.
+They remain reproducers for a
 denial-of-service in `swc_ecma_parser`'s TypeScript grammar, found by
 `cargo +nightly fuzz run sast_parse` (`T-704`) and preserved here so the
 evidence is not lost when `fuzz/artifacts/` is cleaned.
@@ -41,9 +43,17 @@ Not a memory-safety bug. No crash, OOM, or sanitizer report in any run —
 `sast_parse` and `sast_match` cleared 1.05M and 2.33M iterations before the
 soak. The failure mode is time, not memory.
 
-## Why it is unfixed
+## How it is contained
 
-The blowup is upstream and cannot be bounded from our side by the usual means:
+**ADR 0018** bounds every parse with a 5-second worker-thread timeout; a
+timed-out worker is abandoned, and after three timeouts that language is
+abandoned for the rest of the scan. Timed-out files degrade the outcome to
+`Partial`, so nothing is ever wrongly closed (§7.7.4).
+
+The upstream grammar bug is **not fixed** — it is contained. What remains is
+bounded CPU waste on a repo that deliberately ships such files, not a hang.
+
+None of the pre-existing bounds reached it, which is why a new one was needed:
 
 - `MAX_SOURCE_BYTES` (4 MiB) is irrelevant — these inputs are 111–203 bytes.
 - `MAX_MATCH_STEPS` bounds *matching*, not *parsing*.
@@ -53,10 +63,8 @@ The blowup is upstream and cannot be bounded from our side by the usual means:
   because control never returns. Ctrl-C does not help either: `ctx.cancel` is
   read at the same points.
 
-A real bound needs a per-file parse timeout, which means running the parse on a
-worker thread and abandoning it — a design change with its own costs (an
-abandoned thread keeps burning CPU until it finishes), and one that should be a
-deliberate decision rather than a reflex.
+That is exactly what ADR 0018 does, with the abandoned-thread cost accepted
+explicitly and capped.
 
 ## Open question
 
