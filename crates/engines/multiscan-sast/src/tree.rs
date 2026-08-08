@@ -96,6 +96,20 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Whether this kind's [`Node::name`] holds a **literal value** rather than
+    /// an identifier.
+    ///
+    /// Literal values are excluded from the hash basis (ADR 0016 decision 3:
+    /// "raw literal text … excluded"), so rotating a URL, message or magic
+    /// number does not churn `finding_id`. They are still used for *matching*,
+    /// so a rule can pin `hashlib.new("md5")`.
+    pub fn is_literal(self) -> bool {
+        matches!(
+            self,
+            Kind::StringLiteral | Kind::NumberLiteral | Kind::BoolLiteral | Kind::NullLiteral
+        )
+    }
+
     /// The stable wire form. **This string is an identity input** — see the
     /// stability note on [`Kind`].
     pub fn as_str(self) -> &'static str {
@@ -163,9 +177,12 @@ pub struct Node {
     pub kind: Kind,
     /// Normalized identifier text, when the node names something.
     ///
-    /// Identifiers, attribute selectors and literal values that participate in
-    /// matching live here. Formatting-only detail must not: this field is an
-    /// identity input.
+    /// Identifiers, attribute selectors and literal values live here. **The two
+    /// are treated differently downstream:** identifier-ish names feed
+    /// `structural_hash`, literal values do not (see [`Kind::is_literal`] and
+    /// ADR 0016), while *matching* is sensitive to both.
+    ///
+    /// Formatting-only detail must never be stored here.
     pub name: Option<String>,
     /// Child nodes, in source order.
     pub children: Vec<Node>,
@@ -209,8 +226,13 @@ impl Node {
     /// Pre-order traversal of canonical kinds and normalized identifiers, the
     /// exact basis `structural_hash` consumes (`docs/ms-pat-1.md` §5).
     ///
-    /// Spans are excluded, which is what makes a reformatted file produce the
-    /// same `finding_id` (`SAST-002`).
+    /// Excluded, per ADR 0016 decision 3: spans (so a reformatted file keeps
+    /// its `finding_id` — `SAST-002`) and **literal values** (so rotating a URL
+    /// or message string does not churn identity). A literal still contributes
+    /// its *kind*, so `f("a")` and `f(1)` remain distinct shapes.
+    ///
+    /// This is deliberately **not** the basis metavariable binding uses — see
+    /// [`Node::structurally_eq`].
     pub fn structural_parts(&self) -> (Vec<&str>, Vec<&str>) {
         let mut kinds = Vec::new();
         let mut names = Vec::new();
@@ -221,17 +243,23 @@ impl Node {
     fn collect_parts<'a>(&'a self, kinds: &mut Vec<&'a str>, names: &mut Vec<&'a str>) {
         kinds.push(self.kind.as_str());
         if let Some(name) = &self.name {
-            names.push(name.as_str());
+            if !self.kind.is_literal() {
+                names.push(name.as_str());
+            }
         }
         for child in &self.children {
             child.collect_parts(kinds, names);
         }
     }
 
-    /// Structural equality: kinds and normalized identifiers, ignoring spans.
+    /// Structural equality: kinds and names, ignoring spans.
     ///
     /// This is the equality metavariable binding uses, so `foo($X, $X)` matches
     /// `foo(a, a)` regardless of how the two `a`s are formatted.
+    ///
+    /// Unlike [`Node::structural_parts`], this **is** sensitive to literal
+    /// values: `foo($X, $X)` must not match `foo("a", "b")`. Identity and
+    /// matching answer different questions, so they use different bases.
     pub fn structurally_eq(&self, other: &Node) -> bool {
         self.kind == other.kind
             && self.name == other.name

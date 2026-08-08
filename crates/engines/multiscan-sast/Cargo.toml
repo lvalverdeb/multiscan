@@ -22,6 +22,7 @@ swc_common.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+blake3.workspace = true
 
 [lints]
 workspace = true

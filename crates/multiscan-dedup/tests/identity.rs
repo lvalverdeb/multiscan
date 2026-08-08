@@ -25,6 +25,14 @@ fn golden_vectors() {
     }
 }
 
+fn structural_identity(rule: &str, path: &str, hash: &str) -> IdentityKey {
+    IdentityKey::StructuralPattern {
+        rule_id: rule.into(),
+        path: path.into(),
+        structural_hash: hash.into(),
+    }
+}
+
 fn dep_identity(purl: &str, advisory: &str, path: &str) -> IdentityKey {
     IdentityKey::VulnerableDependency {
         purl: purl.into(),
@@ -139,6 +147,32 @@ fn near_misses_do_not_collide() {
         (
             dep_identity("pkg:npm/a@1", "OSV-1", "a/b.tf"),
             dep_identity("pkg:npm/a@1", "OSV-1", "a/b2.tf"),
+        ),
+        // T-703 — StructuralPattern, one field at a time.
+        // Same rule+path, different code shape.
+        (
+            structural_identity("py.eval", "app.py", "b3:aaaa1111"),
+            structural_identity("py.eval", "app.py", "b3:bbbb2222"),
+        ),
+        // Same rule+shape, different file: identical code in two places is two
+        // Findings, because a fix lands in one file at a time.
+        (
+            structural_identity("py.eval", "app.py", "b3:aaaa1111"),
+            structural_identity("py.eval", "lib/util.py", "b3:aaaa1111"),
+        ),
+        // Same path+shape, different rule: two rules matching one construct
+        // are two distinct weaknesses.
+        (
+            structural_identity("py.eval", "app.py", "b3:aaaa1111"),
+            structural_identity("py.exec", "app.py", "b3:aaaa1111"),
+        ),
+        // Native vs imported for the same rule and file. The Bridge cannot
+        // compute our structural hash from a JSON report, so it synthesizes a
+        // `semgrep:`-prefixed one; the namespaces are disjoint by construction
+        // and the two Findings stay separate (phase-2 Q-11).
+        (
+            structural_identity("py.eval", "app.py", "b3:aaaa1111"),
+            structural_identity("py.eval", "app.py", "semgrep:aaaa1111"),
         ),
     ];
     for (left, right) in pairs {

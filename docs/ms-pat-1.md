@@ -80,8 +80,12 @@ letter. A metavariable matches exactly one node and **binds** it.
 Binding is **consistent within a single match**: if `$X` appears more than
 once, every occurrence must bind structurally equal content. `foo($X, $X)`
 matches `foo(a, a)` and not `foo(a, b)`. Equality is structural — canonical
-kinds and normalized identifiers, the same basis as `structural_hash` (§5) —
-so it is insensitive to formatting.
+kinds and names, ignoring spans — so it is insensitive to formatting.
+
+Binding equality is **sensitive to literal values**, so `foo($X, $X)` does not
+match `foo("a", "b")` and a rule may pin `hashlib.new("md5")`. This is *not*
+the basis `structural_hash` uses (§5), which excludes literal values. Identity
+and matching answer different questions and deliberately differ here.
 
 `$_` is the anonymous metavariable: it matches one node and binds nothing, so
 repeated `$_` imposes no equality constraint.
@@ -164,6 +168,13 @@ and excludes spans, line and column numbers, raw literal text, and the
 formatting of the source. This is the definition frozen by the
 `StructuralPattern` identity tuple (§7.7.2: rule ID, normalized path,
 `structural_hash`).
+
+**Literal values are excluded; literal *kinds* are not.** `f("a")` and `f("b")`
+hash identically — rotating a URL, message or magic number must not churn a
+user's baselines — while `f("a")` and `f(1)` differ, because one is a string
+literal and the other a number. Identifiers, attribute selectors and keyword-
+argument names are *not* literals and do feed the hash: `os.system(x)` and
+`system(x)` are different findings.
 
 The hash's domain separator is frozen at `multiscan:structural_hash:v1`.
 
