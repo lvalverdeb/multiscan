@@ -1,4 +1,6 @@
-/target
+# Build output. `target` is unanchored so it also covers the detached
+# `fuzz/` workspace, which has its own target dir.
+target/
 .multiscan/
 .idea/
 *.iml

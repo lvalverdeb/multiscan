@@ -16,6 +16,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 tempfile = "3"
 multiscan-sca = { path = "../crates/engines/multiscan-sca" }
+multiscan-sast = { path = "../crates/engines/multiscan-sast" }
 
 # The fuzz harness requires unsafe; it is not first-party product code, so
 # NFR-009 (forbid unsafe in first-party crates) does not apply here.
@@ -23,6 +24,23 @@ multiscan-sca = { path = "../crates/engines/multiscan-sca" }
 [[bin]]
 name = "tar_extract"
 path = "fuzz_targets/tar_extract.rs"
+test = false
+doc = false
+bench = false
+
+# SAST parsing and matching (T-704). Release-blocking per ADR 0015 decision 4:
+# both front-ends carry unsafe in the parse path, and that is the condition on
+# which those parsers were accepted.
+[[bin]]
+name = "sast_parse"
+path = "fuzz_targets/sast_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sast_match"
+path = "fuzz_targets/sast_match.rs"
 test = false
 doc = false
 bench = false
