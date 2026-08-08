@@ -12,6 +12,7 @@
 //! The contract this implements is `docs/ms-pat-1.md`.
 
 pub mod compile;
+pub mod imports;
 pub mod lang;
 pub mod matcher;
 pub mod pattern;

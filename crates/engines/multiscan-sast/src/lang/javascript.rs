@@ -183,8 +183,34 @@ impl Ctx {
                 DefaultDecl::TsInterfaceDecl(_) => self.node(Kind::Other, span, vec![]),
             },
             ModuleDecl::ExportDefaultExpr(e) => self.expr(&e.expr),
-            // A real import/export-of-names statement carries no executable
-            // body; it is an Import for reachability purposes (T-801).
+
+            // Import/export-of-names statements carry no executable body, but
+            // they do carry the module specifier — which is the whole input to
+            // module-level reachability (T-801, FR-017). The specifier goes in
+            // `name`, matching what the Python front-end does for `from X
+            // import ...`.
+            ModuleDecl::Import(i) => self.named(
+                Kind::Import,
+                i.src.value.as_str().unwrap_or_default(),
+                span,
+                vec![],
+            ),
+            ModuleDecl::ExportNamed(e) => match &e.src {
+                Some(src) => self.named(
+                    Kind::Import,
+                    src.value.as_str().unwrap_or_default(),
+                    span,
+                    vec![],
+                ),
+                None => self.node(Kind::Import, span, vec![]),
+            },
+            ModuleDecl::ExportAll(e) => self.named(
+                Kind::Import,
+                e.src.value.as_str().unwrap_or_default(),
+                span,
+                vec![],
+            ),
+
             _ => self.node(Kind::Import, span, vec![]),
         }
     }
