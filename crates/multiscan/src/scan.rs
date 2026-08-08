@@ -205,6 +205,94 @@ fn resolve_iac_engine(
     engine
 }
 
+/// Resolve the SAST engine for this scan (`T-705`, ADR 0010/0014).
+///
+/// Unlike secrets and IaC there is **no embedded fallback pack**: §1.2 forbids
+/// authoring vulnerability knowledge, so the corpus can only arrive over the
+/// feed channel as a mechanically translated pack (ADR 0014). With no pack the
+/// engine has no rules and reports `NotApplicable`, which is also what stops it
+/// reporting `Complete` over zero rules and closing findings (§7.7.4).
+///
+/// A `[rules] sast_pack = "id@version"` pin selects the matching pack; a pack
+/// that fails to load, or does not satisfy the pin, leaves the engine inert
+/// rather than silently scanning with the wrong corpus.
+fn resolve_sast_engine(
+    ctx: &ScanContext,
+    config: &multiscan_core::Config,
+    quiet: bool,
+    verbose: bool,
+) -> multiscan_sast::SastEngine {
+    let pin = config.rules.as_ref().and_then(|r| r.sast_pack.clone());
+
+    let pack = ctx
+        .feed_cache_dir
+        .as_ref()
+        .and_then(|cache| multiscan_feeds::current_snapshot(cache).ok().flatten())
+        .and_then(|snapshot| match snapshot.rule_pack("sast") {
+            Some(Ok(bytes)) => match multiscan_sast::rules::parse_pack(&bytes) {
+                Ok(pack) => Some(pack),
+                Err(err) => {
+                    if !quiet {
+                        eprintln!("multiscan: warning: feed sast pack invalid: {err}");
+                    }
+                    None
+                }
+            },
+            Some(Err(err)) => {
+                if !quiet {
+                    eprintln!("multiscan: warning: feed sast pack unreadable: {err}");
+                }
+                None
+            }
+            None => None,
+        });
+
+    let Some(pack) = pack else {
+        return multiscan_sast::SastEngine::new();
+    };
+
+    if let Some(pin) = &pin {
+        if format!("{}@{}", pack.id, pack.version) != *pin {
+            if !quiet {
+                eprintln!(
+                    "multiscan: warning: no sast pack matches pin `{pin}`; sast layer inactive"
+                );
+            }
+            return multiscan_sast::SastEngine::new();
+        }
+    }
+
+    // Compile leaf pattern text with the real front-ends. A rule that does not
+    // compile is rejected, never silently skipped — a shrinking corpus that
+    // reads as coverage is the failure ADR 0014 decision 3 guards against.
+    let (rules, rejected) = multiscan_sast::compile::compile_pack(&pack);
+
+    if !quiet && !rejected.is_empty() {
+        eprintln!(
+            "multiscan: sast pack {}@{}: {} rule(s) rejected at load",
+            pack.id,
+            pack.version,
+            rejected.len()
+        );
+        if verbose {
+            for (id, reason) in &rejected {
+                eprintln!("multiscan:   rejected {id}: {reason}");
+            }
+        }
+    }
+    if verbose && !quiet {
+        eprintln!(
+            "multiscan: sast rule pack {}@{} ({} rules, feed snapshot, {})",
+            pack.id,
+            pack.version,
+            rules.len(),
+            pack.digest
+        );
+    }
+
+    multiscan_sast::SastEngine::with_rules(rules)
+}
+
 /// Resolve probe templates (ADR 0010): prefer a `rules/probe.json` template
 /// pack distributed in the pinned snapshot (digest-verified), falling back to
 /// the embedded templates. The pack is a JSON array of templates — parsed by
@@ -998,8 +1086,15 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         )));
     }
     if ctx.layers.contains(&Layer::Sast) {
-        // v1 scaffold: registered but always NotApplicable (NG-2).
-        registry.register(Box::new(multiscan_sast::SastEngine::new()));
+        // Rules arrive over the feed channel or not at all (§1.2, ADR 0014);
+        // with no pack the engine is inert. NG-2 still holds absolutely:
+        // structural matching only, never taint.
+        registry.register(Box::new(resolve_sast_engine(
+            &ctx,
+            &config,
+            args.quiet,
+            args.verbose,
+        )));
     }
     if let Some(count) = args.testkit_fixture {
         if args.testkit_partial {
