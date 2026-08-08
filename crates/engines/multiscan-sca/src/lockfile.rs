@@ -45,6 +45,8 @@ pub fn parser_for(file_name: &str) -> Option<ParseFn> {
         "poetry.lock" => Some(parse_poetry_lock),
         "Gemfile.lock" => Some(parse_gemfile_lock),
         "composer.lock" => Some(parse_composer_lock),
+        "Pipfile.lock" => Some(parse_pipfile_lock),
+        "packages.lock.json" => Some(parse_nuget_lock),
         "gradle.lockfile" => Some(parse_gradle_lockfile),
         // pom.xml is Maven's primary source (Maven has no separate lockfile),
         // so it is a regular input, not a shadowed manifest.
@@ -74,6 +76,8 @@ pub const SUPPORTED_FILES: &[&str] = &[
     "poetry.lock",
     "Gemfile.lock",
     "composer.lock",
+    "Pipfile.lock",
+    "packages.lock.json",
     "gradle.lockfile",
     "pom.xml",
     "package.json",
@@ -1707,5 +1711,231 @@ empty=annotationProcessor
         assert!(pkgs
             .iter()
             .any(|p| p.name == "flask" && p.version.is_none()));
+    }
+}
+
+// ---- Pipfile.lock (pipenv) ----
+
+/// pipenv's lock: `{"default": {"requests": {"version": "==2.31.0"}}, "develop": {...}}`.
+///
+/// Versions carry a `==` prefix because the file records a pinning specifier
+/// rather than a bare version. A package pinned by hash alone has no
+/// `version`, which degrades to an unpinned declaration (`SCA-001`) instead of
+/// being dropped.
+fn parse_pipfile_lock(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    #[derive(Deserialize)]
+    struct PipfileLock {
+        #[serde(default)]
+        default: std::collections::BTreeMap<String, PipfileEntry>,
+        #[serde(default)]
+        develop: std::collections::BTreeMap<String, PipfileEntry>,
+    }
+    #[derive(Deserialize)]
+    struct PipfileEntry {
+        #[serde(default)]
+        version: Option<String>,
+    }
+
+    let lock: PipfileLock = serde_json::from_str(text).map_err(|e| format!("Pipfile.lock: {e}"))?;
+
+    // Both sections are direct declarations: pipenv records the resolved graph
+    // flat, so anything listed was asked for by the project.
+    let mut out = Vec::new();
+    for (name, entry) in lock.default.into_iter().chain(lock.develop) {
+        out.push(ResolvedPackage {
+            ecosystem: "PyPI".to_string(),
+            purl_type: "pypi".to_string(),
+            direct: true,
+            version: entry
+                .version
+                .map(|v| v.trim_start_matches('=').trim().to_string())
+                .filter(|v| !v.is_empty()),
+            name,
+        });
+    }
+    Ok(out)
+}
+
+// ---- packages.lock.json (NuGet) ----
+
+/// NuGet's lock: `{"dependencies": {"net8.0": {"Newtonsoft.Json": {"type":
+/// "Direct", "resolved": "13.0.1"}}}}`.
+///
+/// `type` distinguishes `Direct` (declared in the project) from `Transitive`.
+/// A `Project` entry is a sibling project reference, not a package, so it is
+/// skipped — reporting it would invent a package that does not exist on
+/// nuget.org.
+fn parse_nuget_lock(text: &str) -> Result<Vec<ResolvedPackage>, String> {
+    #[derive(Deserialize)]
+    struct NuGetLock {
+        #[serde(default)]
+        dependencies: std::collections::BTreeMap<String, NuGetFramework>,
+    }
+    type NuGetFramework = std::collections::BTreeMap<String, NuGetEntry>;
+    #[derive(Deserialize)]
+    struct NuGetEntry {
+        #[serde(rename = "type", default)]
+        kind: String,
+        #[serde(default)]
+        resolved: Option<String>,
+    }
+
+    let lock: NuGetLock =
+        serde_json::from_str(text).map_err(|e| format!("packages.lock.json: {e}"))?;
+
+    // A package can appear under several target frameworks; the same
+    // name+version is one package, so dedup rather than double-report.
+    let mut seen: std::collections::BTreeSet<(String, Option<String>)> =
+        std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for framework in lock.dependencies.into_values() {
+        for (name, entry) in framework {
+            if entry.kind.eq_ignore_ascii_case("project") {
+                continue;
+            }
+            let key = (name.clone(), entry.resolved.clone());
+            if !seen.insert(key) {
+                continue;
+            }
+            out.push(ResolvedPackage {
+                ecosystem: "NuGet".to_string(),
+                purl_type: "nuget".to_string(),
+                direct: entry.kind.eq_ignore_ascii_case("direct"),
+                version: entry.resolved,
+                name,
+            });
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod t902_tests {
+    use super::*;
+
+    #[test]
+    fn pipfile_lock_resolves_both_sections() {
+        let text = r#"{
+          "_meta": {"hash": {"sha256": "abc"}},
+          "default": {
+            "requests": {"version": "==2.31.0"},
+            "urllib3":  {"version": "==1.26.5"}
+          },
+          "develop": {
+            "pytest": {"version": "==7.4.0"}
+          }
+        }"#;
+        let pkgs = parse_pipfile_lock(text).unwrap();
+        assert_eq!(pkgs.len(), 3);
+
+        let requests = pkgs.iter().find(|p| p.name == "requests").unwrap();
+        assert_eq!(requests.purl(), "pkg:pypi/requests@2.31.0");
+        assert_eq!(requests.ecosystem, "PyPI");
+        assert!(requests.direct, "pipenv records the graph flat");
+
+        // The `==` pinning specifier is stripped, not carried into the purl.
+        assert!(pkgs
+            .iter()
+            .all(|p| !p.version.as_deref().unwrap_or("").starts_with('=')));
+    }
+
+    #[test]
+    fn pipfile_lock_hash_only_entry_degrades_to_unpinned() {
+        // SCA-001: a package with no version is an unpinned declaration, not
+        // something to drop silently.
+        let text = r#"{"default": {"somepkg": {"hashes": ["sha256:x"]}}}"#;
+        let pkgs = parse_pipfile_lock(text).unwrap();
+        assert_eq!(pkgs.len(), 1);
+        assert_eq!(pkgs[0].version, None);
+        assert_eq!(pkgs[0].purl(), "pkg:pypi/somepkg");
+    }
+
+    #[test]
+    fn nuget_lock_resolves_direct_and_transitive() {
+        let text = r#"{
+          "version": 1,
+          "dependencies": {
+            "net8.0": {
+              "Newtonsoft.Json": {"type": "Direct", "requested": "[13.0.1, )", "resolved": "13.0.1"},
+              "System.Text.Json": {"type": "Transitive", "resolved": "8.0.4"}
+            }
+          }
+        }"#;
+        let pkgs = parse_nuget_lock(text).unwrap();
+        assert_eq!(pkgs.len(), 2);
+
+        let newtonsoft = pkgs.iter().find(|p| p.name == "Newtonsoft.Json").unwrap();
+        assert_eq!(newtonsoft.purl(), "pkg:nuget/Newtonsoft.Json@13.0.1");
+        assert_eq!(newtonsoft.ecosystem, "NuGet");
+        assert!(newtonsoft.direct);
+
+        let system = pkgs.iter().find(|p| p.name == "System.Text.Json").unwrap();
+        assert!(!system.direct, "Transitive is not a direct declaration");
+    }
+
+    #[test]
+    fn nuget_lock_dedups_across_target_frameworks() {
+        // A multi-targeted project lists the same package per framework; that
+        // is one package, not three.
+        let text = r#"{
+          "dependencies": {
+            "net6.0":   {"Serilog": {"type": "Direct", "resolved": "3.1.1"}},
+            "net8.0":   {"Serilog": {"type": "Direct", "resolved": "3.1.1"}},
+            "netstandard2.0": {"Serilog": {"type": "Direct", "resolved": "3.1.1"}}
+          }
+        }"#;
+        let pkgs = parse_nuget_lock(text).unwrap();
+        assert_eq!(pkgs.len(), 1, "same name+version is one package");
+    }
+
+    #[test]
+    fn nuget_lock_keeps_distinct_versions_across_frameworks() {
+        // Different resolutions per framework are genuinely different
+        // packages and both are vulnerable-or-not independently.
+        let text = r#"{
+          "dependencies": {
+            "net6.0": {"Serilog": {"type": "Direct", "resolved": "2.12.0"}},
+            "net8.0": {"Serilog": {"type": "Direct", "resolved": "3.1.1"}}
+          }
+        }"#;
+        let pkgs = parse_nuget_lock(text).unwrap();
+        assert_eq!(pkgs.len(), 2);
+    }
+
+    #[test]
+    fn nuget_lock_skips_project_references() {
+        // A sibling project is not a package on nuget.org; reporting it would
+        // invent one.
+        let text = r#"{
+          "dependencies": {
+            "net8.0": {
+              "MyLib": {"type": "Project"},
+              "Newtonsoft.Json": {"type": "Direct", "resolved": "13.0.1"}
+            }
+          }
+        }"#;
+        let pkgs = parse_nuget_lock(text).unwrap();
+        assert_eq!(pkgs.len(), 1);
+        assert_eq!(pkgs[0].name, "Newtonsoft.Json");
+    }
+
+    #[test]
+    fn malformed_input_degrades_rather_than_panicking() {
+        // A malformed lockfile in someone's repo must warn, never abort.
+        assert!(parse_pipfile_lock("{not json").is_err());
+        assert!(parse_nuget_lock("{not json").is_err());
+        // Structurally valid but empty is simply no packages.
+        assert!(parse_pipfile_lock("{}").unwrap().is_empty());
+        assert!(parse_nuget_lock("{}").unwrap().is_empty());
+    }
+
+    #[test]
+    fn new_formats_are_registered_and_are_not_manifests() {
+        for name in ["Pipfile.lock", "packages.lock.json"] {
+            assert!(parser_for(name).is_some(), "{name} has a parser");
+            assert!(SUPPORTED_FILES.contains(&name), "{name} is discoverable");
+            // Both are lockfiles: exact resolutions, never fallback inputs.
+            assert!(!is_manifest(name), "{name} is not a manifest");
+        }
     }
 }

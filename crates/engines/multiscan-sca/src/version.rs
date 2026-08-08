@@ -30,6 +30,11 @@ pub enum Scheme {
     /// numerically, known qualifiers ranked (alpha < beta < milestone < rc <
     /// snapshot < release < sp), SNAPSHOT below its release.
     Maven,
+    /// NuGet — `NuGetVersion`: up to four numeric parts (major.minor.patch
+    /// .revision), a missing part reading as 0, then SemVer 2.0 pre-release
+    /// precedence. Pre-release labels compare **case-insensitively**, and
+    /// build metadata is ignored, both unlike plain SemVer.
+    NuGet,
     /// Fallback: dotted numeric segments, then lexical. Used where a precise
     /// scheme is not yet wired. Never a silent naive string compare.
     Generic,
@@ -50,6 +55,7 @@ impl Scheme {
             "RubyGems" => Scheme::RubyGems,
             "Packagist" => Scheme::Composer,
             "Maven" => Scheme::Maven,
+            "NuGet" => Scheme::NuGet,
             _ => Scheme::Generic,
         }
     }
@@ -67,6 +73,7 @@ impl Scheme {
             Scheme::RubyGems => cmp_rubygems(a, b),
             Scheme::Composer => cmp_composer(a, b),
             Scheme::Maven => cmp_maven(a, b),
+            Scheme::NuGet => cmp_nuget(a, b),
             Scheme::Generic => cmp_generic(a, b),
         }
     }
@@ -157,6 +164,96 @@ fn cmp_maven(a: &str, b: &str) -> Ordering {
         }
     }
     Ordering::Equal
+}
+
+/// `NuGetVersion` ordering.
+///
+/// Three deliberate differences from plain SemVer, each of which produces a
+/// wrong answer if ignored:
+///
+/// - **Four numeric parts.** `1.2.3.4` is legal; a missing part reads as 0, so
+///   `1.0` == `1.0.0` == `1.0.0.0`. Feeding that to a SemVer parser fails and
+///   the version would sort below every parseable one.
+/// - **Case-insensitive pre-release labels.** `1.0.0-Alpha` == `1.0.0-alpha`.
+/// - **Build metadata is ignored**, as in SemVer, but NuGet also permits it
+///   after a four-part version.
+///
+/// Pre-release precedence is otherwise SemVer 2.0: a pre-release sorts below
+/// its release, dot-separated identifiers compare numerically when both are
+/// numeric and lexically otherwise, and a longer identifier list wins ties.
+fn cmp_nuget(a: &str, b: &str) -> Ordering {
+    struct NuGetVersion {
+        parts: [u64; 4],
+        pre: Vec<String>,
+    }
+
+    fn parse(v: &str) -> Option<NuGetVersion> {
+        let v = v.trim();
+        // Build metadata never affects precedence.
+        let v = v.split('+').next().unwrap_or(v);
+        let (core, pre) = match v.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (v, None),
+        };
+
+        let mut parts = [0u64; 4];
+        let mut count = 0;
+        for segment in core.split('.') {
+            if count == 4 || segment.is_empty() {
+                return None;
+            }
+            parts[count] = segment.parse().ok()?;
+            count += 1;
+        }
+        if count == 0 {
+            return None;
+        }
+
+        let pre = pre
+            .map(|p| {
+                p.split('.')
+                    // Labels are case-insensitive, unlike SemVer.
+                    .map(|id| id.to_ascii_lowercase())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if pre.iter().any(String::is_empty) {
+            return None;
+        }
+        Some(NuGetVersion { parts, pre })
+    }
+
+    fn cmp_pre(a: &[String], b: &[String]) -> Ordering {
+        // A release outranks any pre-release of the same core version.
+        match (a.is_empty(), b.is_empty()) {
+            (true, true) => return Ordering::Equal,
+            (true, false) => return Ordering::Greater,
+            (false, true) => return Ordering::Less,
+            (false, false) => {}
+        }
+        for (x, y) in a.iter().zip(b) {
+            let ord = match (x.parse::<u64>(), y.parse::<u64>()) {
+                (Ok(nx), Ok(ny)) => nx.cmp(&ny),
+                // Numeric identifiers always sort below alphanumeric ones.
+                (Ok(_), Err(_)) => Ordering::Less,
+                (Err(_), Ok(_)) => Ordering::Greater,
+                (Err(_), Err(_)) => x.cmp(y),
+            };
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        }
+        a.len().cmp(&b.len())
+    }
+
+    match (parse(a), parse(b)) {
+        (Some(x), Some(y)) => x.parts.cmp(&y.parts).then_with(|| cmp_pre(&x.pre, &y.pre)),
+        // An unparseable version sorts below a parseable one, so it can never
+        // spuriously satisfy a range bound.
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (None, None) => a.cmp(b),
+    }
 }
 
 /// `Gem::Version` ordering. A version is a sequence of segments — numeric
@@ -544,5 +641,76 @@ mod tests {
         assert_eq!(Scheme::Rpm.compare("1.0-1", "1.0-2"), Less);
         assert_eq!(Scheme::Rpm.compare("1.10-1", "1.9-1"), Greater);
         assert_eq!(Scheme::Rpm.compare("2:1.0-1", "1:2.0-1"), Greater); // epoch wins
+    }
+}
+
+#[cfg(test)]
+mod nuget_tests {
+    use super::*;
+
+    fn lt(a: &str, b: &str) {
+        assert_eq!(Scheme::NuGet.compare(a, b), Ordering::Less, "{a} < {b}");
+        assert_eq!(Scheme::NuGet.compare(b, a), Ordering::Greater, "{b} > {a}");
+    }
+    fn eq(a: &str, b: &str) {
+        assert_eq!(Scheme::NuGet.compare(a, b), Ordering::Equal, "{a} == {b}");
+    }
+
+    #[test]
+    fn numeric_ordering_is_not_lexical() {
+        // The defect this whole module exists to prevent (SCA-002).
+        lt("1.9.0", "1.10.0");
+        lt("1.2.3", "1.2.10");
+    }
+
+    #[test]
+    fn a_missing_part_reads_as_zero() {
+        // NuGet's four-part core: 1.0 == 1.0.0 == 1.0.0.0. A SemVer parser
+        // rejects the four-part form outright and would sort it below
+        // everything parseable.
+        eq("1.0", "1.0.0");
+        eq("1.0.0", "1.0.0.0");
+        lt("1.0.0.0", "1.0.0.1");
+        lt("1.0.0.9", "1.0.1");
+    }
+
+    #[test]
+    fn prerelease_sorts_below_its_release() {
+        lt("1.0.0-alpha", "1.0.0");
+        lt("1.0.0-alpha", "1.0.0-beta");
+        lt("1.0.0-beta.2", "1.0.0-beta.10");
+        lt("1.0.0-alpha", "1.0.0-alpha.1");
+    }
+
+    #[test]
+    fn prerelease_labels_are_case_insensitive() {
+        // Unlike plain SemVer — this is a real NuGet rule, and getting it
+        // wrong makes `1.0.0-Alpha` and `1.0.0-alpha` different versions.
+        eq("1.0.0-Alpha", "1.0.0-alpha");
+        eq("1.0.0-RC.1", "1.0.0-rc.1");
+    }
+
+    #[test]
+    fn build_metadata_does_not_affect_precedence() {
+        eq("1.0.0+build1", "1.0.0+build2");
+        eq("1.0.0+build1", "1.0.0");
+    }
+
+    #[test]
+    fn numeric_prerelease_identifiers_sort_below_alphanumeric() {
+        lt("1.0.0-1", "1.0.0-alpha");
+    }
+
+    #[test]
+    fn unparseable_versions_sort_below_parseable_ones() {
+        // A malformed version must never spuriously satisfy a range bound.
+        lt("not-a-version", "0.0.0");
+        lt("1.2.3.4.5", "0.0.1");
+        assert_eq!(Scheme::NuGet.compare("junk", "junk"), Ordering::Equal);
+    }
+
+    #[test]
+    fn osv_ecosystem_maps_to_the_scheme() {
+        assert_eq!(Scheme::for_osv_ecosystem("NuGet"), Scheme::NuGet);
     }
 }
