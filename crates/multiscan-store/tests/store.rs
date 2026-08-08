@@ -36,6 +36,7 @@ fn finding(id: &str, score: f64, status: FindingStatus) -> Finding {
                 exploitability: 0.55,
                 confidence: 0.85,
                 asset_criticality: 1.0,
+                reachability: 1.0,
             },
             raw_product: 0.24,
             defaults_applied: vec![],

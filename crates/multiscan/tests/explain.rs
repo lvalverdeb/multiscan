@@ -64,7 +64,11 @@ fn explain_prints_factors_evidence_remediation() {
     assert!(text.contains("defaults applied"));
     assert!(text.contains("Evidence"));
     assert!(text.contains("Remediation"));
-    assert!(text.contains("Score (formula 1)"));
+    assert!(text.contains("Score (formula 2)"));
+    // T-803 / FR-016: the reachability determination is stated, and always
+    // says module-level so it is never read as a symbol-level claim.
+    assert!(text.contains("R reachability"));
+    assert!(text.contains("module-level") || text.contains("unknown"));
 }
 
 /// --history prints the event log (at least the FirstSeen event).

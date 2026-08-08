@@ -45,16 +45,18 @@
               "score_explanation": {
                 "defaults_applied": [
                   "asset_criticality",
-                  "exposure"
+                  "exposure",
+                  "reachability"
                 ],
                 "factors": {
                   "asset_criticality": 1.0,
                   "confidence": 0.7,
                   "exploitability": 0.55,
                   "exposure": 0.7,
+                  "reachability": 1.0,
                   "severity_base": 0.75
                 },
-                "formula_version": "1",
+                "formula_version": "2",
                 "raw_product": 0.20212499999999994
               },
               "severity": "high",
@@ -112,16 +114,18 @@
               "score_explanation": {
                 "defaults_applied": [
                   "asset_criticality",
-                  "exposure"
+                  "exposure",
+                  "reachability"
                 ],
                 "factors": {
                   "asset_criticality": 1.0,
                   "confidence": 0.7,
                   "exploitability": 0.55,
                   "exposure": 0.7,
+                  "reachability": 1.0,
                   "severity_base": 0.5
                 },
-                "formula_version": "1",
+                "formula_version": "2",
                 "raw_product": 0.13474999999999998
               },
               "severity": "medium",

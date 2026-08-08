@@ -274,7 +274,21 @@ fn print_explanation(f: &Finding) {
     println!("  rule: {rule}");
     println!("  location: {}", f.location.path);
 
-    // RSK-005: all five factors, the raw product, defaults applied, snapshot.
+    // T-803 / FR-016: state the reachability determination in words, and say
+    // *module-level* every time. ADR 0013 requires that a user never reads this
+    // as a symbol-level or dataflow claim — it means "the package is imported",
+    // nothing stronger.
+    fn reachability_verdict(r: f64) -> &'static str {
+        if r > 1.0 {
+            "referenced — scanned source imports this package (module-level)"
+        } else if r < 1.0 {
+            "not referenced — no import found in scanned source (module-level)"
+        } else {
+            "unknown — no reachability evidence; scored as neutral"
+        }
+    }
+
+    // RSK-005: all six factors, the raw product, defaults applied, snapshot.
     let e = &f.score_explanation;
     println!();
     println!("Score (formula {})", e.formula_version);
@@ -283,6 +297,11 @@ fn print_explanation(f: &Finding) {
     println!("  X exploitability      {:.3}", e.factors.exploitability);
     println!("  C confidence          {:.3}", e.factors.confidence);
     println!("  A asset_criticality   {:.3}", e.factors.asset_criticality);
+    println!(
+        "  R reachability        {:.3}  ({})",
+        e.factors.reachability,
+        reachability_verdict(e.factors.reachability)
+    );
     println!("  ── raw product        {:.4}", e.raw_product);
     println!("  → risk_score          {:.1}", f.risk_score);
     if e.defaults_applied.is_empty() {

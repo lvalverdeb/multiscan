@@ -1,13 +1,19 @@
 //! T-104 acceptance: golden scoring vectors match to ±0.1 and explanations
-//! carry all five factors, the raw product, defaults, and the snapshot id
+//! carry all six factors, the raw product, defaults, and the snapshot id
 //! (FR-008, RSK-002/003/005).
+//!
+//! Factor R (reachability) arrived with T-802 / formula_version 2; a vector
+//! that omits `reachability` means `Unknown`, which is the corpus-realistic
+//! case ADR 0013 asked these vectors to cover.
 
 // Test-support helpers outside #[test] fns; the in-tests clippy allowance
 // does not reach them.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use multiscan_core::{Confidence, Criticality, DataClassification, Severity};
-use multiscan_risk::{score, ExploitSignal, ExposureSignal, RiskContext, Scored, ScoringInputs};
+use multiscan_risk::{
+    score, ExploitSignal, ExposureSignal, ReachabilitySignal, RiskContext, Scored, ScoringInputs,
+};
 
 fn parse_inputs(v: &serde_json::Value) -> ScoringInputs {
     let severity: Severity = serde_json::from_value(v["severity"].clone()).unwrap();
@@ -30,12 +36,21 @@ fn parse_inputs(v: &serde_json::Value) -> ScoringInputs {
     let data_classification: Option<DataClassification> = v
         .get("data_classification")
         .map(|c| serde_json::from_value(c.clone()).unwrap());
+    let reachability = match v.get("reachability").and_then(serde_json::Value::as_str) {
+        Some("referenced") => ReachabilitySignal::Referenced,
+        Some("not_referenced") => ReachabilitySignal::NotReferenced,
+        // Omitted means Unknown: the overwhelmingly common case in a real
+        // corpus, and the one that must leave v1 rankings untouched.
+        None | Some("unknown") => ReachabilitySignal::Unknown,
+        Some(other) => panic!("unknown reachability {other}"),
+    };
     ScoringInputs {
         severity,
         cvss_base: v.get("cvss_base").and_then(serde_json::Value::as_f64),
         confidence,
         exposure,
         exploit,
+        reachability,
         context: RiskContext {
             asset_criticality,
             data_classification,
@@ -82,11 +97,15 @@ fn golden_vectors_match_within_tolerance() {
         // FR-008: the explanation lists exactly five factors, and the raw
         // product is consistent with them.
         let f = &explanation.factors;
-        let product =
-            f.severity_base * f.exposure * f.exploitability * f.confidence * f.asset_criticality;
+        let product = f.severity_base
+            * f.exposure
+            * f.exploitability
+            * f.confidence
+            * f.asset_criticality
+            * f.reachability;
         assert!((product - explanation.raw_product).abs() < 1e-12, "{name}");
         let factors_json = serde_json::to_value(f).unwrap();
-        assert_eq!(factors_json.as_object().unwrap().len(), 5, "{name}");
+        assert_eq!(factors_json.as_object().unwrap().len(), 6, "{name}");
         assert_eq!(risk_score, 100.0 * explanation.raw_product.clamp(0.0, 1.0));
     }
 }
@@ -115,6 +134,7 @@ fn factor_ranges() {
                 confidence: Confidence::Heuristic,
                 exposure: ExposureSignal::Unknown,
                 exploit,
+                reachability: ReachabilitySignal::Unknown,
                 context: RiskContext::default(),
                 feed_snapshot_id: None,
             });
@@ -138,6 +158,7 @@ fn asset_criticality_clamps() {
         confidence: Confidence::Proven,
         exposure: ExposureSignal::InternetReachable,
         exploit: ExploitSignal::Kev,
+        reachability: ReachabilitySignal::Referenced,
         context: RiskContext {
             asset_criticality: Some(Criticality::Critical),
             data_classification: Some(DataClassification::Regulated),
@@ -146,4 +167,71 @@ fn asset_criticality_clamps() {
     });
     assert!(scored.explanation.factors.asset_criticality <= 1.30);
     assert_eq!(scored.risk_score, 100.0);
+}
+
+/// `FR-017`: reachability is three-state, and `Unknown` must never behave like
+/// `NotReferenced`. Suppressing a real Finding because the parser did not
+/// understand a file is a far worse failure than carrying noise.
+#[test]
+fn unknown_reachability_is_neutral_not_pessimistic() {
+    let inputs = |reachability| ScoringInputs {
+        severity: Severity::High,
+        cvss_base: None,
+        confidence: Confidence::Corroborated,
+        exposure: ExposureSignal::Unknown,
+        exploit: ExploitSignal::NoCve,
+        reachability,
+        context: RiskContext::default(),
+        feed_snapshot_id: None,
+    };
+
+    let referenced = score(&inputs(ReachabilitySignal::Referenced));
+    let unknown = score(&inputs(ReachabilitySignal::Unknown));
+    let not_referenced = score(&inputs(ReachabilitySignal::NotReferenced));
+
+    // Strictly ordered, with Unknown in the middle rather than at the bottom.
+    assert!(referenced.risk_score > unknown.risk_score);
+    assert!(unknown.risk_score > not_referenced.risk_score);
+
+    // Unknown is exactly neutral: identical to the v1 five-factor product, so
+    // the formula_version bump does not reshuffle rankings for users who get
+    // no reachability signal (ADR 0013).
+    let f = &unknown.explanation.factors;
+    let v1_product =
+        f.severity_base * f.exposure * f.exploitability * f.confidence * f.asset_criticality;
+    assert!((unknown.explanation.raw_product - v1_product).abs() < 1e-12);
+
+    // RSK-002: the default is recorded, never silently applied.
+    assert!(unknown
+        .explanation
+        .defaults_applied
+        .contains(&"reachability".to_string()));
+    assert!(!referenced
+        .explanation
+        .defaults_applied
+        .contains(&"reachability".to_string()));
+}
+
+/// `RSK-006`: reachability changes rank, not existence. A `NotReferenced`
+/// Finding is still reported and still gateable — only its score falls.
+#[test]
+fn not_referenced_still_scores_above_zero() {
+    let scored = score(&ScoringInputs {
+        severity: Severity::Critical,
+        cvss_base: None,
+        confidence: Confidence::Proven,
+        exposure: ExposureSignal::InternetReachable,
+        exploit: ExploitSignal::Kev,
+        reachability: ReachabilitySignal::NotReferenced,
+        context: RiskContext::default(),
+        feed_snapshot_id: None,
+    });
+    assert!(
+        scored.risk_score > 0.0,
+        "a NotReferenced finding must still exist and still gate"
+    );
+    assert!(
+        scored.risk_score < 100.0,
+        "…but rank below the same finding when referenced"
+    );
 }

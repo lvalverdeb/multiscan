@@ -43,6 +43,9 @@ fn imported_explanation() -> ScoreExplanation {
             exploitability: 0.5,
             confidence: 0.7,
             asset_criticality: 1.0,
+            // Imported: no source was parsed, so reachability is
+            // Unknown — neutral, never NotReferenced (FR-017).
+            reachability: 1.0,
         },
         raw_product: 0.0,
         defaults_applied: vec!["imported".to_string()],

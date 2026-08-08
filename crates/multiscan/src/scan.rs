@@ -18,6 +18,7 @@ use multiscan_risk::{score, ExploitSignal, ExposureSignal, RiskContext, ScoringI
 use crate::cli::{ScanArgs, ScanTarget};
 use crate::configfile;
 use crate::exit::Exit;
+use crate::reachability;
 
 /// Parse a kebab-case enum value the same way serde would.
 fn parse_enum<T: serde::de::DeserializeOwned>(s: &str) -> Option<T> {
@@ -504,7 +505,17 @@ fn scan_web(url: &str, args: &crate::cli::ScanArgs) -> Result<Exit> {
     let merged = multiscan_dedup::merge(attributed);
     let mut findings: Vec<Finding> = merged
         .into_iter()
-        .map(|m| assemble_finding(m, &RiskContext::default(), None, None))
+        // A web target has no first-party source to read, so reachability is
+        // Unknown for everything here (FR-017).
+        .map(|m| {
+            assemble_finding(
+                m,
+                &RiskContext::default(),
+                None,
+                None,
+                &reachability::Index::empty(),
+            )
+        })
         .collect();
     sort_findings(&mut findings);
 
@@ -665,6 +676,8 @@ fn scan_image(reference: &str, args: &ScanArgs) -> Result<Exit> {
                 &RiskContext::default(),
                 feed_snapshot_id.clone(),
                 enrichment.as_ref(),
+                // An image carries no first-party source tree.
+                &reachability::Index::empty(),
             )
         })
         .collect();
@@ -1071,6 +1084,16 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         .as_ref()
         .and_then(|cache| multiscan_feeds::current_snapshot(cache).ok().flatten())
         .and_then(|snapshot| snapshot.enrichment().ok());
+    // Reachability stage (FR-017): parse first-party source once and record
+    // which modules it imports, so a dependency finding can say whether the
+    // package is used at all. Only meaningful when the SAST layer is selected —
+    // otherwise no source was scanned, and "no evidence" must stay Unknown
+    // rather than become NotReferenced.
+    let reachability_index = if ctx.layers.contains(&Layer::Sast) {
+        reachability::Index::build(&ctx.root, &ctx.excludes)
+    } else {
+        reachability::Index::empty()
+    };
     let mut findings: Vec<Finding> = merged
         .into_iter()
         .map(|m| {
@@ -1079,6 +1102,7 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
                 &risk_context,
                 ctx.feed_snapshot_id.clone(),
                 enrichment.as_ref(),
+                &reachability_index,
             )
         })
         .collect();
@@ -1237,6 +1261,7 @@ fn assemble_finding(
     risk_context: &RiskContext,
     feed_snapshot_id: Option<String>,
     enrichment: Option<&multiscan_feeds::Enrichment>,
+    reachability: &reachability::Index,
 ) -> Finding {
     let exposure = match merged.identity {
         IdentityKey::WebExposure { .. } => ExposureSignal::InternetReachable,
@@ -1249,6 +1274,7 @@ fn assemble_finding(
         confidence: merged.confidence,
         exposure,
         exploit,
+        reachability: reachability.signal_for(&merged.identity),
         context: *risk_context,
         feed_snapshot_id,
     });

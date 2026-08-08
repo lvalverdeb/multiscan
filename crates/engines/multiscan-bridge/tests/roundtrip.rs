@@ -34,6 +34,7 @@ fn sample(id: &str, sev: Severity) -> Finding {
                 exploitability: 1.0,
                 confidence: 0.85,
                 asset_criticality: 1.0,
+                reachability: 1.0,
             },
             raw_product: 0.44,
             defaults_applied: vec![],

@@ -13,17 +13,21 @@
   "status": "open",
   "risk_score": 82.4,
   "score_explanation": {
-    "formula_version": "1",
+    "formula_version": "2",
     "feed_snapshot_id": "osv-2026-08-05",
     "factors": {
       "severity_base": 0.8,
       "exposure": 1.0,
       "exploitability": 0.9,
       "confidence": 0.85,
-      "asset_criticality": 1.2
+      "asset_criticality": 1.2,
+      "reachability": 1.0
     },
     "raw_product": 0.7344,
-    "defaults_applied": ["exposure"]
+    "defaults_applied": [
+      "exposure",
+      "reachability"
+    ]
   },
   "asset": {
     "kind": "package",
@@ -37,17 +41,28 @@
     {
       "kind": "lockfile_entry",
       "summary": "lodash@4.17.20 required via express > body-parser",
-      "dependency_path": ["pkg:npm/express@4.18.0", "pkg:npm/lodash@4.17.20"]
+      "dependency_path": [
+        "pkg:npm/express@4.18.0",
+        "pkg:npm/lodash@4.17.20"
+      ]
     }
   ],
   "sources": [
-    { "engine_id": "multiscan.sca", "rule_id": "GHSA-35jh-r3h4-6jhm" },
-    { "engine_id": "external:trivy", "rule_id": "CVE-2021-23337" }
+    {
+      "engine_id": "multiscan.sca",
+      "rule_id": "GHSA-35jh-r3h4-6jhm"
+    },
+    {
+      "engine_id": "external:trivy",
+      "rule_id": "CVE-2021-23337"
+    }
   ],
   "remediation": {
     "fix_available": true,
     "fixed_version": "4.17.21",
     "summary": "Upgrade lodash to 4.17.21."
   },
-  "cwe": ["CWE-77"]
+  "cwe": [
+    "CWE-77"
+  ]
 }

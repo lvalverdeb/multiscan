@@ -6,6 +6,7 @@ mod configfile;
 mod db;
 mod exit;
 mod history;
+mod reachability;
 mod scan;
 mod suppress;
 

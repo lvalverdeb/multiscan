@@ -101,10 +101,17 @@ pub fn language_for_extension(extension: &str) -> Option<Language> {
     }
 }
 
-/// Discover source files a front-end can handle.
+/// Discover source files a front-end can handle: `(absolute, relative, language)`.
 ///
 /// Extension-only, exclude-aware, and bounded. Results are sorted by relative
 /// path so emission order does not depend on the filesystem (`DET-002`).
+///
+/// Public because reachability (`T-802`) walks the same file set to extract
+/// imports, and the two must agree on what counts as scanned source.
+pub fn discover(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, Language)> {
+    find_files(root, excludes)
+}
+
 fn find_files(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, Language)> {
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
