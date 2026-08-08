@@ -25,6 +25,7 @@ rewrite.
 | [0014](0014-sast-rule-syntax.md) | SAST rule syntax — `MS-PAT-1`, a defined Semgrep subset | Accepted | Extends §7.5; resolves §17 Q-04 |
 | [0015](0015-phase2-parser-selection.md) | Phase-2 source parsers — `ruff_python_parser` + `swc_ecma_parser`, at MSRV 1.95 | Accepted | Supersedes ADR 0001; resolves phase-2 Q-07 |
 | [0016](0016-structural-hash-canonical-kinds.md) | `structural_hash` consumes canonical node kinds, not the parser's | Accepted | **Amends** §7.7.2 and §7.5 |
+| [0017](0017-reachability-risk-factor.md) | The risk formula gains a sixth factor — module-level reachability | Proposed | **Amends** §8 and FR-008 |
 
 ## Conventions
 

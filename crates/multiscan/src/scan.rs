@@ -1086,11 +1086,14 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         .and_then(|snapshot| snapshot.enrichment().ok());
     // Reachability stage (FR-017): parse first-party source once and record
     // which modules it imports, so a dependency finding can say whether the
-    // package is used at all. Only meaningful when the SAST layer is selected —
-    // otherwise no source was scanned, and "no evidence" must stay Unknown
-    // rather than become NotReferenced.
-    let reachability_index = if ctx.layers.contains(&Layer::Sast) {
-        reachability::Index::build(&ctx.root, &ctx.excludes)
+    // package is used at all.
+    //
+    // Gated on the SCA layer, not SAST: reachability is evidence *for
+    // dependency findings*, and it is only ever consulted for them. Gating on
+    // SAST would starve `--layers sca` — precisely the run that benefits — and
+    // would tie the factor to an engine that ships no rules yet.
+    let reachability_index = if ctx.layers.contains(&Layer::Sca) {
+        reachability::Index::build(&ctx.root, &ctx.excludes, &ctx.cancel)
     } else {
         reachability::Index::empty()
     };

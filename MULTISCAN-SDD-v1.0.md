@@ -411,7 +411,7 @@ Required importers: SARIF 2.1.0 (generic), Trivy JSON, Semgrep JSON, Checkov JSO
 # 8. Risk Scoring [NORMATIVE]
 
 ```
-risk_score = 100 × clamp01(S × E × X × C × A)
+risk_score = 100 × clamp01(S × E × X × C × A × R)
 ```
 
 | Factor | Range | Notes |
@@ -426,7 +426,7 @@ risk_score = 100 × clamp01(S × E × X × C × A)
 - RSK-002 Missing inputs MUST use documented defaults and be listed in `score_explanation.defaults_applied`.
 - RSK-003 Every score MUST record `feed_snapshot_id` and `formula_version`.
 - RSK-004 Formula changes MUST bump `formula_version` and ship a documented migration note. Never mutate stored scores silently.
-- RSK-005 `multiscan explain <id>` MUST print all five factors, the raw product, defaults applied, and the feed snapshot used.
+- RSK-005 `multiscan explain <id>` MUST print all six factors, the raw product, defaults applied, and the feed snapshot used. (Amended by ADR 0017 — R, module-level reachability, joined the formula at `formula_version` 2.)
 
 ---
 
@@ -526,7 +526,7 @@ pub trait Store {
 | FR-005 | Secrets never persisted | Given a detected AWS key, when output is written, then no output artefact or DB row contains the full value. |
 | FR-006 | IaC policy evaluation | Given a public S3 bucket in Terraform, when scanned, then a Finding with ≥1 CIS control mapping. |
 | FR-007 | Probe requires authorization | Given `scan web` with no `--authorization`, when run, then exit 4 with zero packets sent (verified by network mock). |
-| FR-008 | Scoring correctness | Given the golden vectors, when scored, then values match to ±0.1 and `score_explanation` lists five factors. |
+| FR-008 | Scoring correctness | Given the golden vectors, when scored, then values match to ±0.1 and `score_explanation` lists six factors. (Amended by ADR 0017 — five before `formula_version` 2.) |
 | FR-009 | Gate semantics | Given `--fail-on 80` and a Finding at 82.4, when run, then exit 1 and the blocking id is printed to stderr. |
 | FR-010 | Baseline delta gating | Given a baseline containing the only high Finding, when run with `--baseline`, then exit 0. |
 | FR-011 | Offline operation | Given `--offline` with a fresh snapshot, when scanned, then no network syscall occurs (verified by sandbox). |

@@ -123,8 +123,8 @@ phase_8_reachability:
 
 | ID | Requirement | Acceptance |
 |---|---|---|
-| FR-017 | Reachability is three-state | Given an unsupported language, when scored, then the factor is `Unknown` with its default recorded, never `NotReferenced`. |
-| RSK-006 | Reachability changes rank, not existence | Given a `NotReferenced` finding, when scanned, then it is still reported and still gateable — only its `risk_score` falls. |
+| FR-017 | Reachability is three-state | Given an unsupported language, when scored, then the factor is `Unknown` with its default recorded, never `NotReferenced`. **Realized by ADR 0017** (weights, npm-only negatives). |
+| RSK-006 | Reachability changes rank, not existence | Given a `NotReferenced` finding, when scanned, then it is still reported and still gateable — only its `risk_score` falls. **Realized by ADR 0017**; migration note in `docs/scoring-migrations.md`. |
 
 This is a scoring change, so it carries the full `RSK-004` obligation: `formula_version` bump, migration
 note, no silent mutation of stored scores. Historical Findings keep the score they were written with.

@@ -15,12 +15,18 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use multiscan_core::IdentityKey;
 use multiscan_engine::PathFilter;
 use multiscan_risk::ReachabilitySignal;
 use multiscan_sast::imports::{self, Imports};
+use multiscan_sast::lang::MAX_SOURCE_BYTES as MAX_SOURCE_BYTES_USIZE;
 use multiscan_sast::rules::Language;
+
+/// Size cap, mirroring the front-ends' own limit so this pass rejects exactly
+/// what they would.
+const MAX_SOURCE_BYTES: u64 = MAX_SOURCE_BYTES_USIZE as u64;
 
 /// Modules imported anywhere in the scanned tree, plus whether extraction was
 /// complete enough to draw a negative conclusion.
@@ -43,20 +49,56 @@ impl Index {
 
     /// Build by parsing every supported source file under `root`.
     ///
-    /// A file that fails to parse marks its whole ecosystem untrustworthy: if
-    /// we could not read some of the repo's Python, we must not conclude that
-    /// a Python package is unused.
-    pub fn build(root: &Path, excludes: &PathFilter) -> Self {
+    /// **Anything not read cleanly marks its ecosystem untrustworthy** — a
+    /// parse failure, an unreadable file, or one over the size cap. If some of
+    /// the repo's Python went unread, we are not entitled to conclude that a
+    /// Python package is unused.
+    ///
+    /// Honours `cancel` between files: Ctrl-C mid-scan yields an index that
+    /// concludes nothing rather than one that concludes wrongly from a partial
+    /// read.
+    pub fn build(root: &Path, excludes: &PathFilter, cancel: &AtomicBool) -> Self {
         let mut imports = Imports::new();
+        // An ecosystem is trustworthy only once at least one of its files has
+        // been parsed. Starting these at `true` would make a repo with no
+        // Python — or no source at all — report every PyPI package as
+        // NotReferenced, concluding absence from zero evidence. That is the
+        // exact failure FR-017's three-state design exists to prevent.
+        let mut python_seen = false;
+        let mut js_seen = false;
         let mut python_ok = true;
         let mut js_ok = true;
 
         for (abs, _rel, language) in multiscan_sast::discover(root, excludes) {
+            match language {
+                Language::Python => python_seen = true,
+                _ => js_seen = true,
+            }
+            if cancel.load(Ordering::Relaxed) {
+                // Stop, and trust nothing: the remaining files were never read.
+                return Index {
+                    imports,
+                    trustworthy: BTreeSet::new(),
+                };
+            }
+
+            let mark_untrusted = |python_ok: &mut bool, js_ok: &mut bool| match language {
+                Language::Python => *python_ok = false,
+                _ => *js_ok = false,
+            };
+
+            // Bound allocation by input size *before* reading (NFR-003): a
+            // multi-GB blob must not be pulled into memory just to be rejected.
+            let too_big = std::fs::metadata(&abs)
+                .map(|m| m.len() > MAX_SOURCE_BYTES)
+                .unwrap_or(true);
+            if too_big {
+                mark_untrusted(&mut python_ok, &mut js_ok);
+                continue;
+            }
+
             let Ok(text) = std::fs::read_to_string(&abs) else {
-                match language {
-                    Language::Python => python_ok = false,
-                    _ => js_ok = false,
-                }
+                mark_untrusted(&mut python_ok, &mut js_ok);
                 continue;
             };
             let parsed = match language {
@@ -68,18 +110,15 @@ impl Index {
             };
             match parsed {
                 Ok(tree) => imports.extend(imports::extract(&tree, language)),
-                Err(_) => match language {
-                    Language::Python => python_ok = false,
-                    _ => js_ok = false,
-                },
+                Err(_) => mark_untrusted(&mut python_ok, &mut js_ok),
             }
         }
 
         let mut trustworthy = BTreeSet::new();
-        if python_ok {
+        if python_seen && python_ok {
             trustworthy.insert("pypi");
         }
-        if js_ok {
+        if js_seen && js_ok {
             trustworthy.insert("npm");
         }
         Index {
@@ -282,6 +321,91 @@ mod tests {
                 "reachability does not apply to {identity:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_oversize_file_is_never_read_and_poisons_negatives() {
+        // NFR-003: bound allocation by input size before reading. And an
+        // unread file must not let us conclude a package is unused.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("app.js"), "import x from 'react';\n").unwrap();
+
+        let huge = dir.path().join("bundle.js");
+        let f = std::fs::File::create(&huge).unwrap();
+        f.set_len(MAX_SOURCE_BYTES + 1).unwrap();
+        drop(f);
+
+        let idx = Index::build(dir.path(), &PathFilter::empty(), &AtomicBool::new(false));
+
+        // The readable file still contributed.
+        assert_eq!(
+            idx.signal_for(&dep("pkg:npm/react@18.0.0")),
+            ReachabilitySignal::Referenced
+        );
+        // But the skipped blob makes "not imported" unsafe to assert.
+        assert_eq!(
+            idx.signal_for(&dep("pkg:npm/lodash@4.17.20")),
+            ReachabilitySignal::Unknown,
+            "an unread file must poison negative conclusions"
+        );
+    }
+
+    #[test]
+    fn cancellation_yields_an_index_that_concludes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.js"), "import x from 'react';\n").unwrap();
+
+        let cancelled = AtomicBool::new(true);
+        let idx = Index::build(dir.path(), &PathFilter::empty(), &cancelled);
+
+        assert_eq!(
+            idx.signal_for(&dep("pkg:npm/lodash@4.17.20")),
+            ReachabilitySignal::Unknown,
+            "a cancelled pass must not produce NotReferenced"
+        );
+    }
+
+    #[test]
+    fn build_reads_both_ecosystems() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.js"), "const _ = require('lodash');\n").unwrap();
+        std::fs::write(dir.path().join("b.py"), "import requests\n").unwrap();
+
+        let idx = Index::build(dir.path(), &PathFilter::empty(), &AtomicBool::new(false));
+
+        assert_eq!(
+            idx.signal_for(&dep("pkg:npm/lodash@4.17.20")),
+            ReachabilitySignal::Referenced
+        );
+        assert_eq!(
+            idx.signal_for(&dep("pkg:pypi/requests@2.0.0")),
+            ReachabilitySignal::Referenced
+        );
+        // npm negatives are trustworthy here; both files parsed.
+        assert_eq!(
+            idx.signal_for(&dep("pkg:npm/react@18.0.0")),
+            ReachabilitySignal::NotReferenced
+        );
+    }
+
+    #[test]
+    fn a_syntax_error_poisons_only_its_own_ecosystem() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ok.js"), "import x from 'react';\n").unwrap();
+        std::fs::write(dir.path().join("broken.py"), "def (:\n").unwrap();
+
+        let idx = Index::build(dir.path(), &PathFilter::empty(), &AtomicBool::new(false));
+
+        // JS parsed cleanly, so a JS negative still stands.
+        assert_eq!(
+            idx.signal_for(&dep("pkg:npm/lodash@4.17.20")),
+            ReachabilitySignal::NotReferenced
+        );
+        // Python did not, so a Python negative does not.
+        assert_eq!(
+            idx.signal_for(&dep("pkg:pypi/requests@2.0.0")),
+            ReachabilitySignal::Unknown
+        );
     }
 
     #[test]
