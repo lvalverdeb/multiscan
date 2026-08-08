@@ -290,7 +290,14 @@ fn resolve_sast_engine(
         );
     }
 
-    multiscan_sast::SastEngine::with_rules(rules)
+    // Record which corpus ran, so a Finding's provenance chain can name it
+    // (FD-006) — the same contract the IaC engine honours.
+    let rule_set = multiscan_core::RuleSetRef {
+        id: pack.id.clone(),
+        version: pack.version.clone(),
+        digest: pack.digest.clone(),
+    };
+    multiscan_sast::SastEngine::with_pack(rules, Some(rule_set), rejected.len())
 }
 
 /// Resolve probe templates (ADR 0010): prefer a `rules/probe.json` template

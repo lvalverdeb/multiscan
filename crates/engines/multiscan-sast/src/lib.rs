@@ -163,6 +163,13 @@ fn find_files(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, Langu
 pub struct SastEngine {
     manifest: EngineManifest,
     rules: Vec<CompiledRule>,
+    /// Rules the pack carried that could not be loaded or compiled.
+    ///
+    /// Nonzero means this scan ran with **fewer rules than the pack declares**,
+    /// so `Complete` would be a lie: a rule that fired yesterday and is broken
+    /// today would have its findings closed as `Fixed` while the code is
+    /// unchanged (§7.7.4). The outcome degrades to `Partial` instead.
+    rejected_rules: usize,
 }
 
 impl SastEngine {
@@ -171,8 +178,23 @@ impl SastEngine {
         Self::with_rules(Vec::new())
     }
 
-    /// Construct the engine with a compiled rule set.
+    /// Construct the engine with a compiled rule set and no pack provenance.
+    /// Convenience for tests; production goes through [`SastEngine::with_pack`].
     pub fn with_rules(rules: Vec<CompiledRule>) -> Self {
+        Self::with_pack(rules, None, 0)
+    }
+
+    /// Construct the engine from a loaded pack.
+    ///
+    /// `rule_set` records *which corpus ran* in the manifest (`FD-006`), the
+    /// same way the IaC engine does — without it a Finding's provenance chain
+    /// cannot name the pack that produced it. `rejected` is the count of rules
+    /// the pack declared but that failed to load or compile.
+    pub fn with_pack(
+        rules: Vec<CompiledRule>,
+        rule_set: Option<multiscan_core::RuleSetRef>,
+        rejected: usize,
+    ) -> Self {
         Self {
             manifest: EngineManifest {
                 id: "multiscan.sast".to_string(),
@@ -181,7 +203,7 @@ impl SastEngine {
                 layers: vec![Layer::Sast],
                 network_impact: NetworkImpact::ReadOnly,
                 requires_authorization: false,
-                rule_set: None,
+                rule_set,
                 // Every rule carries its own explicit severity (SAST-004); this
                 // map remains the manifest-level declaration ENG-004 requires.
                 severity_map: [("structural", Severity::Medium)]
@@ -190,6 +212,7 @@ impl SastEngine {
                     .collect(),
             },
             rules,
+            rejected_rules: rejected,
         }
     }
 
@@ -297,7 +320,15 @@ impl Engine for SastEngine {
         let files = find_files(&ctx.root, &ctx.excludes);
         let total = files.len() as u64;
         let mut scanned = 0u64;
-        let mut degraded: Option<String> = None;
+        // A pack that only partly compiled means this run cannot close
+        // anything: rules the pack declares were not applied, so their absence
+        // from the output is not evidence they no longer match (§7.7.4).
+        let mut degraded: Option<String> = (self.rejected_rules > 0).then(|| {
+            format!(
+                "{} pack rule(s) rejected at load; scanned with fewer rules than the pack declares",
+                self.rejected_rules
+            )
+        });
 
         for (abs, rel, language) in files {
             if ctx.should_stop() {

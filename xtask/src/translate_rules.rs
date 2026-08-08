@@ -27,6 +27,16 @@ use anyhow::{bail, Context, Result};
 /// review-time convention. The Semgrep community registry's Commons Clause is
 /// the known landmine: it restricts selling, which is why no `Commons-Clause`
 /// variant appears here and cannot be added without its own review.
+/// Deliberately the unambiguous core only. Every entry here is already in
+/// `deny.toml`'s reviewed vocabulary. Copyleft and public-domain-dedication
+/// edge cases (`LGPL-*`, `Unlicense`) are **not** included: applied to
+/// redistributed rule content they are exactly what a review exists to decide,
+/// and this list is not the place to decide them unilaterally.
+///
+/// Note that even these require carrying the upstream copyright notice and
+/// licence text. Provenance currently records an SPDX id and a source URL,
+/// which is identification, not attribution — shipping a real corpus needs
+/// that settled first.
 const REDISTRIBUTABLE: &[&str] = &[
     "MIT",
     "Apache-2.0",
@@ -34,8 +44,6 @@ const REDISTRIBUTABLE: &[&str] = &[
     "BSD-3-Clause",
     "ISC",
     "CC0-1.0",
-    "Unlicense",
-    "LGPL-2.1-or-later",
 ];
 
 /// Languages the front-ends handle (ADR 0013). A rule targeting anything else
