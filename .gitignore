@@ -5,3 +5,9 @@ target/
 .idea/
 *.iml
 .DS_Store
+
+# cargo-fuzz working state: `corpus/` is regenerated per run and `artifacts/`
+# holds crash reproducers. A reproducer that ever appears belongs in a test, not
+# here — see the fuzz targets' oracles.
+fuzz/corpus/
+fuzz/artifacts/

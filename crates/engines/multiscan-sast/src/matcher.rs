@@ -18,6 +18,59 @@ use crate::tree::Node;
 /// recursion rather than overflow the stack.
 pub const MAX_MATCH_DEPTH: usize = 512;
 
+/// Maximum matching steps per `for_each_match` call.
+///
+/// The ellipsis caps in `pattern` bound *k*, the number of `...` in a sequence.
+/// They do **not** bound *n*, the number of siblings in scanned source — and
+/// sequence matching explores O(n^k) splits. A pack-legal pattern such as
+/// `f(..., $X, ..., $Y, ..., $X, ...)` against a call with hundreds of distinct
+/// arguments takes seconds and grows superlinearly (measured: 18 ms at n=50,
+/// 76 ms at n=100, 519 ms at n=200), so a wide call in one file could stall a
+/// scan. The exponent is capped at pack load; this caps the base at match time.
+///
+/// A fixed constant, so exhaustion happens at the same point on every run
+/// (`DET-001`).
+pub const MAX_MATCH_STEPS: u64 = 1_000_000;
+
+/// Remaining match steps, shared across one `for_each_match` call.
+struct Budget {
+    remaining: std::cell::Cell<u64>,
+    exhausted: std::cell::Cell<bool>,
+}
+
+impl Budget {
+    fn new() -> Self {
+        Budget {
+            remaining: std::cell::Cell::new(MAX_MATCH_STEPS),
+            exhausted: std::cell::Cell::new(false),
+        }
+    }
+
+    /// Consume one step. `false` means the budget is gone and matching must
+    /// unwind.
+    fn step(&self) -> bool {
+        let left = self.remaining.get();
+        if left == 0 {
+            self.exhausted.set(true);
+            return false;
+        }
+        self.remaining.set(left - 1);
+        true
+    }
+}
+
+/// What a matching run cost, and whether it finished.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct MatchStats {
+    /// True when [`MAX_MATCH_STEPS`] ran out.
+    ///
+    /// **Callers must not treat this as "no more matches".** Exhaustion means
+    /// matching gave up, so results are incomplete — an Engine must degrade the
+    /// file to `Partial`, exactly as it would for a parse error, or a silent
+    /// false negative would let `Complete` close findings (§7.7.4).
+    pub budget_exhausted: bool,
+}
+
 /// Metavariable bindings for one match, ordered for determinism.
 ///
 /// Values borrow the matched tree — matching never clones subtrees, so a large
@@ -39,7 +92,11 @@ fn match_node<'a>(
     pattern: &PatternNode,
     node: &'a Node,
     bindings: Bindings<'a>,
+    budget: &Budget,
 ) -> Option<Bindings<'a>> {
+    if !budget.step() {
+        return None;
+    }
     match pattern {
         // `$_` matches one node and binds nothing, so repeating it imposes no
         // equality constraint.
@@ -71,7 +128,7 @@ fn match_node<'a>(
                     return None;
                 }
             }
-            match_seq(children, &node.children, bindings)
+            match_seq(children, &node.children, bindings, budget)
         }
     }
 }
@@ -84,7 +141,11 @@ fn match_seq<'a>(
     items: &[SeqItem],
     nodes: &'a [Node],
     bindings: Bindings<'a>,
+    budget: &Budget,
 ) -> Option<Bindings<'a>> {
+    if !budget.step() {
+        return None;
+    }
     match items.split_first() {
         // Both exhausted together, or the pattern ran out with nodes left over.
         None => nodes.is_empty().then_some(bindings),
@@ -93,7 +154,7 @@ fn match_seq<'a>(
             // `...` is greedy-agnostic: try every split, shortest first, so the
             // choice is deterministic rather than dependent on tree shape.
             for take in 0..=nodes.len() {
-                if let Some(next) = match_seq(rest, &nodes[take..], bindings.clone()) {
+                if let Some(next) = match_seq(rest, &nodes[take..], bindings.clone(), budget) {
                     return Some(next);
                 }
             }
@@ -102,8 +163,8 @@ fn match_seq<'a>(
 
         Some((SeqItem::Node(pattern), rest)) => {
             let (first, tail) = nodes.split_first()?;
-            let next = match_node(pattern, first, bindings)?;
-            match_seq(rest, tail, next)
+            let next = match_node(pattern, first, bindings, budget)?;
+            match_seq(rest, tail, next, budget)
         }
     }
 }
@@ -115,25 +176,29 @@ fn match_expr<'a>(
     node: &'a Node,
     ancestors: &[&'a Node],
     bindings: Bindings<'a>,
+    budget: &Budget,
 ) -> Option<Bindings<'a>> {
+    if !budget.step() {
+        return None;
+    }
     match expr {
-        PatternExpr::Pattern(pattern) => match_node(pattern, node, bindings),
+        PatternExpr::Pattern(pattern) => match_node(pattern, node, bindings, budget),
 
         // Conjunction threads bindings, so a metavariable shared between
         // operands must agree across them.
-        PatternExpr::All(list) => list
-            .iter()
-            .try_fold(bindings, |acc, e| match_expr(e, node, ancestors, acc)),
+        PatternExpr::All(list) => list.iter().try_fold(bindings, |acc, e| {
+            match_expr(e, node, ancestors, acc, budget)
+        }),
 
         // First branch in declaration order wins — pack order is the tiebreak,
         // never iteration order (DET-001).
         PatternExpr::Either(list) => list
             .iter()
-            .find_map(|e| match_expr(e, node, ancestors, bindings.clone())),
+            .find_map(|e| match_expr(e, node, ancestors, bindings.clone(), budget)),
 
         // Negation is a filter, not a binder: it must not match, and it
         // contributes no bindings.
-        PatternExpr::Not(inner) => match_expr(inner, node, ancestors, bindings.clone())
+        PatternExpr::Not(inner) => match_expr(inner, node, ancestors, bindings.clone(), budget)
             .is_none()
             .then_some(bindings),
 
@@ -142,14 +207,14 @@ fn match_expr<'a>(
             // Innermost first, so the nearest enclosing context wins.
             (0..chain.len())
                 .rev()
-                .find_map(|i| match_expr(inner, chain[i], &chain[..i], bindings.clone()))
+                .find_map(|i| match_expr(inner, chain[i], &chain[..i], bindings.clone(), budget))
         }
 
         PatternExpr::NotInside(inner) => {
             let chain = ancestor_chain(node, ancestors);
-            let found = (0..chain.len())
-                .rev()
-                .any(|i| match_expr(inner, chain[i], &chain[..i], bindings.clone()).is_some());
+            let found = (0..chain.len()).rev().any(|i| {
+                match_expr(inner, chain[i], &chain[..i], bindings.clone(), budget).is_some()
+            });
             (!found).then_some(bindings)
         }
     }
@@ -172,33 +237,43 @@ fn ancestor_chain<'a>(node: &'a Node, ancestors: &[&'a Node]) -> Vec<&'a Node> {
 /// Subtrees deeper than [`MAX_MATCH_DEPTH`] are not descended into; the rest of
 /// the tree still matches, which keeps a pathological file a degraded scan
 /// rather than a failed one.
-pub fn for_each_match<'a, F>(expr: &PatternExpr, root: &'a Node, mut on_match: F)
+pub fn for_each_match<'a, F>(expr: &PatternExpr, root: &'a Node, mut on_match: F) -> MatchStats
 where
     F: FnMut(Match<'a>),
 {
+    let budget = Budget::new();
     let mut ancestors = Vec::new();
-    walk(expr, root, &mut ancestors, &mut on_match);
+    walk(expr, root, &mut ancestors, &mut on_match, &budget);
+    MatchStats {
+        budget_exhausted: budget.exhausted.get(),
+    }
 }
 
-fn walk<'a, F>(expr: &PatternExpr, node: &'a Node, ancestors: &mut Vec<&'a Node>, on_match: &mut F)
-where
+fn walk<'a, F>(
+    expr: &PatternExpr,
+    node: &'a Node,
+    ancestors: &mut Vec<&'a Node>,
+    on_match: &mut F,
+    budget: &Budget,
+) where
     F: FnMut(Match<'a>),
 {
-    if ancestors.len() >= MAX_MATCH_DEPTH {
+    if ancestors.len() >= MAX_MATCH_DEPTH || budget.exhausted.get() {
         return;
     }
-    if let Some(bindings) = match_expr(expr, node, ancestors, Bindings::new()) {
+    if let Some(bindings) = match_expr(expr, node, ancestors, Bindings::new(), budget) {
         on_match(Match { node, bindings });
     }
     ancestors.push(node);
     for child in &node.children {
-        walk(expr, child, ancestors, on_match);
+        walk(expr, child, ancestors, on_match, budget);
     }
     ancestors.pop();
 }
 
 /// Collect all matches. Convenience for tests and small trees; Engines should
-/// prefer [`for_each_match`] so nothing is buffered.
+/// prefer [`for_each_match`] so nothing is buffered — and so they can see
+/// [`MatchStats::budget_exhausted`], which this discards.
 pub fn matches<'a>(expr: &PatternExpr, root: &'a Node) -> Vec<Match<'a>> {
     let mut found = Vec::new();
     for_each_match(expr, root, |m| found.push(m));
@@ -526,6 +601,81 @@ mod tests {
             let again = matches(&expr, &tree);
             assert_eq!(first.len(), again.len());
             assert_eq!(first[0].bindings["X"], again[0].bindings["X"]);
+        }
+    }
+
+    #[test]
+    fn a_wide_sequence_exhausts_the_budget_visibly() {
+        // The ellipsis caps bound k (the number of `...`); they do NOT bound n
+        // (siblings in attacker-controlled source), and matching explores
+        // O(n^k) splits. This pattern is pack-legal — four ellipses, none
+        // adjacent — and `$X` twice with all-distinct arguments forces every
+        // split to be tried before failing.
+        let expr = PatternExpr::Pattern(p_call(
+            "f",
+            vec![
+                SeqItem::Ellipsis,
+                p_arg(p_metavar("X")),
+                SeqItem::Ellipsis,
+                p_arg(p_metavar("Y")),
+                SeqItem::Ellipsis,
+                p_arg(p_metavar("X")),
+                SeqItem::Ellipsis,
+            ],
+        ));
+        let args: Vec<Node> = (0..400).map(|i| ident(&format!("a{i}"))).collect();
+        let tree = call("f", args);
+
+        let mut found = Vec::new();
+        let stats = for_each_match(&expr, &tree, |m| found.push(m));
+
+        assert!(
+            stats.budget_exhausted,
+            "a 400-argument call must hit the step budget rather than run for seconds"
+        );
+        // And the caller can tell: this is what makes the Engine degrade to
+        // Partial instead of silently reporting a clean Complete.
+    }
+
+    #[test]
+    fn ordinary_matching_never_touches_the_budget() {
+        // The budget must be a backstop, not something real rules feel.
+        let tree = Node::leaf(Kind::Block).with_children(
+            (0..200)
+                .map(|i| call("eval", vec![ident(&format!("v{i}"))]))
+                .collect(),
+        );
+        let expr = PatternExpr::Pattern(p_call("eval", vec![p_arg(p_metavar("X"))]));
+
+        let mut found = Vec::new();
+        let stats = for_each_match(&expr, &tree, |m| found.push(m));
+
+        assert_eq!(found.len(), 200);
+        assert!(!stats.budget_exhausted, "a normal file must not be capped");
+    }
+
+    #[test]
+    fn budget_exhaustion_is_deterministic() {
+        // DET-001: a fixed constant, so the give-up point is identical run to
+        // run rather than time- or allocation-dependent.
+        let expr = PatternExpr::Pattern(p_call(
+            "f",
+            vec![
+                SeqItem::Ellipsis,
+                p_arg(p_metavar("X")),
+                SeqItem::Ellipsis,
+                p_arg(p_metavar("Y")),
+                SeqItem::Ellipsis,
+                p_arg(p_metavar("X")),
+                SeqItem::Ellipsis,
+            ],
+        ));
+        let args: Vec<Node> = (0..400).map(|i| ident(&format!("a{i}"))).collect();
+        let tree = call("f", args);
+
+        let first = for_each_match(&expr, &tree, |_| {});
+        for _ in 0..5 {
+            assert_eq!(first, for_each_match(&expr, &tree, |_| {}));
         }
     }
 

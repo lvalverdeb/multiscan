@@ -192,7 +192,9 @@ impl SastEngine {
         rel_path: &str,
         language: Language,
         sink: &mut dyn FindingSink,
-    ) -> Result<(), multiscan_engine::SinkError> {
+    ) -> Result<Option<String>, multiscan_engine::SinkError> {
+        let mut degraded = None;
+
         for rule in &self.rules {
             let Some(expr) = rule.per_language.get(&language) else {
                 continue;
@@ -201,9 +203,19 @@ impl SastEngine {
             // never the whole scan (NFR-003) — because the matcher's callback
             // cannot propagate a SinkError out of the walk.
             let mut emitted = Vec::new();
-            matcher::for_each_match(expr, tree, |m| {
+            let stats = matcher::for_each_match(expr, tree, |m| {
                 emitted.push((structural_hash_of(m.node), m.node.span.line));
             });
+            if stats.budget_exhausted {
+                // Matching gave up, so this rule's results are incomplete.
+                // Surfacing it degrades the scan to Partial; swallowing it
+                // would be a silent false negative that lets Complete close
+                // findings (§7.7.4).
+                degraded = Some(format!(
+                    "{rel_path}: rule {} exhausted the match budget",
+                    rule.id
+                ));
+            }
             for (structural_hash, line) in emitted {
                 sink.emit(RawFinding {
                     identity: IdentityKey::StructuralPattern {
@@ -238,7 +250,7 @@ impl SastEngine {
                 })?;
             }
         }
-        Ok(())
+        Ok(degraded)
     }
 }
 
@@ -313,8 +325,12 @@ impl Engine for SastEngine {
                 }
             };
 
-            self.match_file(&tree, &rel, language, sink)
-                .map_err(|e| EngineError::Failed(e.to_string()))?;
+            if let Some(reason) = self
+                .match_file(&tree, &rel, language, sink)
+                .map_err(|e| EngineError::Failed(e.to_string()))?
+            {
+                degraded = Some(reason);
+            }
         }
 
         match degraded {
