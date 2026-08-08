@@ -1,6 +1,6 @@
 # ADR 0016: `structural_hash` consumes canonical node kinds, not the parser's
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-07
 - Amends: §7.7.2 (the `structural_hash` note under the identity tuples) and the
   §7.5 engine description. Entailed by ADR 0015; realizes `SAST-002`.
