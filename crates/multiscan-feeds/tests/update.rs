@@ -101,6 +101,7 @@ fn update_writes_pinned_snapshot_end_to_end() {
         osv_base_url: base.clone(),
         osv_ecosystems: vec!["npm".to_string()],
         rules_url: None,
+        sast_rules_url: None,
     };
     let now = chrono::Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
 
@@ -211,6 +212,7 @@ fn update_fetches_rules_pack_into_snapshot() {
         osv_base_url: base.clone(),
         osv_ecosystems: vec!["npm".to_string()],
         rules_url: Some(format!("{base}/rules.json")),
+        sast_rules_url: None,
     };
     let now = chrono::Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
 

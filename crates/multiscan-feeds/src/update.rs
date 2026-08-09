@@ -35,6 +35,14 @@ pub struct FeedSources {
     /// embedded pack in force. The host must be feed-allow-listed like any
     /// other feed URL.
     pub rules_url: Option<String>,
+    /// Optional SAST rule-pack URL (ADR 0014/0010): when set, `update` fetches
+    /// it into the snapshot as `rules/sast.json`.
+    ///
+    /// Separate from `rules_url` because the SAST corpus has no embedded
+    /// fallback — §1.2 forbids authoring one, so the pack arrives over this
+    /// channel or the layer stays inert. The host must be feed-allow-listed
+    /// like any other feed URL.
+    pub sast_rules_url: Option<String>,
 }
 
 impl Default for FeedSources {
@@ -63,6 +71,7 @@ impl Default for FeedSources {
             // No public rules feed exists yet; opt in via config/env so the
             // default `db update` behaves exactly as before.
             rules_url: None,
+            sast_rules_url: None,
         }
     }
 }
@@ -107,12 +116,20 @@ pub fn update(
         let bytes = client.fetch(rules_url)?;
         rule_packs.insert("secrets".to_string(), bytes);
     }
+    if let Some(sast_url) = &sources.sast_rules_url {
+        eprintln!("multiscan db update: fetching sast rule pack...");
+        let bytes = client.fetch(sast_url)?;
+        rule_packs.insert("sast".to_string(), bytes);
+    }
 
     let mut source_map = BTreeMap::new();
     source_map.insert("kev".to_string(), sources.kev_url.clone());
     source_map.insert("epss".to_string(), sources.epss_url.clone());
     if let Some(rules_url) = &sources.rules_url {
         source_map.insert("rules/secrets".to_string(), rules_url.clone());
+    }
+    if let Some(sast_url) = &sources.sast_rules_url {
+        source_map.insert("rules/sast".to_string(), sast_url.clone());
     }
     for ecosystem in &sources.osv_ecosystems {
         source_map.insert(

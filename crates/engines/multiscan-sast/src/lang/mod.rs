@@ -141,29 +141,38 @@ pub fn pattern_from_tree(node: &Node) -> PatternNode {
     }
 }
 
-/// Unwrap the synthetic module a leaf pattern parses into.
+/// Convert the synthetic module a leaf pattern parses into a [`PatternNode`].
 ///
-/// A leaf pattern is **one construct**, not a file. A multi-statement pattern
-/// would otherwise compile to a `Module` pattern that can only ever match at
-/// file root — silently never matching anything a rule author meant. Rejection
-/// is total, per `docs/ms-pat-1.md` §1.
-pub fn single_construct<'a>(
-    tree: &'a Node,
-    language: &'static str,
-) -> Result<&'a Node, LowerError> {
+/// One construct compiles to that construct. **Several compile to a statement
+/// subsequence** (ADR 0019): real community rules routinely write
+///
+/// ```text
+/// $X = require('buffer')
+/// ...
+/// new $X(...)
+/// ```
+///
+/// and mean "these statements, in this order, somewhere in a block". Compiling
+/// that to a whole-module pattern would have matched only at file root, so it
+/// used to be rejected outright; it is now a first-class form.
+pub fn compile_module(tree: &Node, language: &'static str) -> Result<PatternNode, LowerError> {
     match tree.children.as_slice() {
-        [only] => Ok(only),
+        [only] => Ok(pattern_from_tree(only)),
         [] => Err(LowerError::Parse {
             language,
             detail: "leaf pattern is empty".to_string(),
         }),
-        many => Err(LowerError::Parse {
-            language,
-            detail: format!(
-                "leaf pattern must be a single construct, found {}; \
-                 use pattern-inside or separate rules",
-                many.len()
-            ),
+        many => Ok(PatternNode::Sequence {
+            items: many
+                .iter()
+                .map(|child| {
+                    if is_ellipsis_marker(child) {
+                        SeqItem::Ellipsis
+                    } else {
+                        SeqItem::Node(pattern_from_tree(child))
+                    }
+                })
+                .collect(),
         }),
     }
 }

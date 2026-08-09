@@ -7,7 +7,7 @@ use swc_common::{sync::Lrc, FileName, SourceMap};
 use swc_ecma_ast::{Callee, Decl, Expr, Lit, ModuleItem, Pat, Prop, PropOrSpread, Stmt};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsSyntax};
 
-use super::{pattern_from_tree, substitute_placeholders, LineIndex, LowerError, MAX_SOURCE_BYTES};
+use super::{substitute_placeholders, LineIndex, LowerError, MAX_SOURCE_BYTES};
 use crate::pattern::PatternNode;
 use crate::tree::{Kind, Node, Span};
 
@@ -99,7 +99,7 @@ pub fn lower_source(source: &str, typescript: bool) -> Result<Node, LowerError> 
 pub fn compile_pattern(pattern_text: &str, typescript: bool) -> Result<PatternNode, LowerError> {
     let substituted = substitute_placeholders(pattern_text);
     let tree = lower_source(&substituted, typescript)?;
-    super::single_construct(&tree, "javascript").map(pattern_from_tree)
+    super::compile_module(&tree, "javascript")
 }
 
 use swc_common::Spanned;
@@ -666,11 +666,13 @@ mod tests {
     }
 
     #[test]
-    fn multi_statement_leaf_patterns_are_rejected() {
-        // Would otherwise compile to a Module pattern matchable only at file
-        // root — silently never matching what the author meant.
-        let err = compile_pattern("eval(x); eval(y);", false).unwrap_err();
-        assert!(err.to_string().contains("single construct"), "got: {err}");
+    fn multi_statement_leaf_patterns_compile_to_a_sequence() {
+        // ADR 0019 reversed this; see the Python front-end for the same note.
+        let compiled = compile_pattern("eval(x); eval(y);", false).unwrap();
+        assert!(matches!(
+            compiled,
+            crate::pattern::PatternNode::Sequence { .. }
+        ));
     }
 
     #[test]

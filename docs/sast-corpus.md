@@ -5,8 +5,9 @@ actually permit, and what survived translation into `MS-PAT-1`. Per ADR 0014
 decision 4 the licence check is blocking, so this audit is a prerequisite to
 shipping anything — not documentation written after the fact.
 
-**Nothing here is shipped yet.** Publishing a pack to the feed channel is a
-distribution decision, and it is the user's.
+**The pack is published**: `rules/sast.json`, fetched into a snapshot by
+`multiscan db update` when `sast_rules_url` is configured. With no pack the
+SAST layer is inert by design — there is no embedded fallback corpus.
 
 ## Licence audit
 
@@ -46,8 +47,8 @@ cargo xtask translate-rules \
 
 ## What survived
 
-Of 645 rule files: **135 translated, 480 dropped**, and of those 135, **61
-compile and run**.
+Of 645 rule files: **135 translated, 480 dropped**, and of those 135, **80
+compile and run** (61 before ADR 0019 added statement-subsequence patterns).
 
 | Stage | Dropped | Why |
 |---|---|---|
@@ -56,41 +57,26 @@ compile and run**.
 | Translate | 27 | `metavariable-*` operators — out of subset |
 | Translate | 6 | Autofix and regex operators — out of subset |
 | Load | 10 | Over the ellipsis cap, plus one duplicate rule id in the corpus |
-| Compile | 64 | Leaf pattern text did not parse — **see below** |
+| Compile | 55 | Leaf pattern text did not parse — **see below** |
 
-**61 working rules across Python and JavaScript/TypeScript**, and they fire
+**80 working rules across Python and JavaScript/TypeScript**, and they fire
 zero times against the quiet corpus (`FP-006`) — the false-positive gate
 holding against real community rules rather than a synthetic fixture.
 
-## The one gap worth closing
+## The gap that was closed
 
-Almost all 64 compile failures are the same thing: **multi-statement leaf
-patterns**, which `MS-PAT-1` currently rejects. Real rules routinely write
+The largest single cause of compile failures — 64 rules — was **multi-statement
+leaf patterns**, which `MS-PAT-1` rejected. **ADR 0019 added them**, taking
+working rules from 61 to 80 with no change to the corpus or the translator.
 
-```yaml
-pattern: |
-  $X = require('buffer')
-  ...
-  new $X(...)
-```
-
-Semgrep matches that as a *statement subsequence* anywhere in a block. We
-compile a leaf pattern into a single construct, so a two-statement pattern
-becomes a whole-module pattern that could only ever match at file root — which
-is why it is rejected rather than silently mismatching.
-
-Supporting it means a new pattern form that matches a contiguous run of
-statements inside any block, regardless of that block's kind. That is a
-**widening of `MS-PAT-1`**, and ADR 0014's consequences are explicit that
-widening the subset "is a new ADR, not a translator patch". So it is recorded
-here rather than done.
-
-The remaining handful are genuine Semgrep syntax we do not implement — typed
-metavariables, deep-expression operators — and one JSX-valued pattern.
+The remaining ~55 are genuine Semgrep syntax outside the subset: typed
+metavariables, deep-expression operators (`<... ...>`), and one JSX-valued
+pattern. Each would be its own widening decision, and none is as dominant as
+the statement-subsequence gap was.
 
 ## Notes for whoever ships this
 
-- 61 rules is a real starting corpus, not a placeholder; but the dropped-rule
+- 80 rules is a real starting corpus, not a placeholder; but the dropped-rule
   count is the metric ADR 0014 asks us to watch, and at 480/645 it is
   dominated by out-of-scope languages, which is expected and benign.
 - `elttam/semgrep-rules` was translated too and yielded **2** usable rules: its

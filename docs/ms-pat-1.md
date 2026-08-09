@@ -52,6 +52,8 @@ The complete set. There are no others.
 | `pattern-inside` | Context. The operand must match **at or above** the match site — the node itself or one of its ancestors. The nearest enclosing match wins. |
 | `pattern-not-inside` | Negative context. No node at or above the match site may match the operand. |
 
+A leaf pattern may span several statements — see §3.
+
 `patterns` (conjunction) is spelled as a JSON array of operator objects, all of
 which must hold at the same node.
 
@@ -67,10 +69,25 @@ translator (`T-705`) counts the dropped rule rather than dropping it silently.
 A leaf pattern is **source code of the target language with holes**. It is
 compiled by that language's front-end (`T-702`), not by the operator layer.
 
-A leaf pattern must be a **single construct**. A multi-statement pattern is
-rejected at pack load: it would compile to a whole-file pattern that could only
-match at the module root, silently never matching what the author meant. Use
-`pattern-inside` for context, or separate rules.
+A leaf pattern is usually a **single construct**. A **multi-statement** leaf
+pattern is also allowed, and means a *statement subsequence* (ADR 0019):
+
+```yaml
+pattern: |
+  $ALIAS = eval;
+  ...
+  $ALIAS($OBJ)
+```
+
+matches those statements, in that order, as a contiguous run of children inside
+**any** node that has them — file root, a function body, a `try` block. The
+enclosing node's kind is not pinned, because the same statements mean the same
+thing wherever they appear. Metavariables bind across the run, which is what
+lets a rule tie a value's origin to its use without dataflow analysis.
+
+This is ordering and co-occurrence, not dataflow: a rule can say "these
+statements appear in this order", never "this value reaches that sink"
+(`NG-2`).
 
 ### Metavariables
 

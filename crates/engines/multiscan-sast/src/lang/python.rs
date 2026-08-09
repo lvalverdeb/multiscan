@@ -7,7 +7,7 @@
 use ruff_python_ast::{Expr, Mod, Stmt};
 use ruff_text_size::Ranged;
 
-use super::{pattern_from_tree, substitute_placeholders, LineIndex, LowerError, MAX_SOURCE_BYTES};
+use super::{substitute_placeholders, LineIndex, LowerError, MAX_SOURCE_BYTES};
 use crate::pattern::PatternNode;
 use crate::tree::{Kind, Node, Span};
 
@@ -46,7 +46,7 @@ pub fn lower_source(source: &str) -> Result<Node, LowerError> {
 pub fn compile_pattern(pattern_text: &str) -> Result<PatternNode, LowerError> {
     let substituted = substitute_placeholders(pattern_text);
     let tree = lower_source(&substituted)?;
-    super::single_construct(&tree, "python").map(pattern_from_tree)
+    super::compile_module(&tree, "python")
 }
 
 fn span_of(start: usize, end: usize, index: &LineIndex) -> Span {
@@ -484,10 +484,14 @@ mod tests {
     }
 
     #[test]
-    fn multi_statement_leaf_patterns_are_rejected() {
-        // Would compile to a Module pattern matchable only at file root.
-        let err = compile_pattern("eval(x)\neval(y)\n").unwrap_err();
-        assert!(err.to_string().contains("single construct"), "got: {err}");
+    fn multi_statement_leaf_patterns_compile_to_a_sequence() {
+        // ADR 0019 reversed this: they used to be rejected as "not a single
+        // construct". They now compile to a statement-subsequence pattern.
+        let compiled = compile_pattern("eval(x)\neval(y)\n").unwrap();
+        assert!(matches!(
+            compiled,
+            crate::pattern::PatternNode::Sequence { .. }
+        ));
     }
 
     #[test]
@@ -512,5 +516,73 @@ mod tests {
             Some("__ms_metavar_X"),
             "the source identifier is bound as data, not treated as a hole"
         );
+    }
+}
+
+#[cfg(test)]
+mod sequence_tests {
+    use super::*;
+    use crate::matcher::matches;
+    use crate::pattern::PatternExpr;
+
+    fn expr(pattern: &str) -> PatternExpr {
+        PatternExpr::Pattern(compile_pattern(pattern).unwrap())
+    }
+
+    #[test]
+    fn a_multi_statement_pattern_matches_a_statement_run() {
+        // ADR 0019. Previously rejected outright as "not a single construct".
+        let e = expr("$X = get_input()\n...\neval($X)\n");
+        let tree = lower_source("a = get_input()\nlog(a)\neval(a)\n").unwrap();
+        assert_eq!(matches(&e, &tree).len(), 1);
+    }
+
+    #[test]
+    fn the_metavariable_must_agree_across_statements() {
+        // The whole point of the form: it ties two statements together.
+        let e = expr("$X = get_input()\n...\neval($X)\n");
+        let tree = lower_source("a = get_input()\nb = 1\neval(b)\n").unwrap();
+        assert!(
+            matches(&e, &tree).is_empty(),
+            "different variable, no match"
+        );
+    }
+
+    #[test]
+    fn order_matters() {
+        let e = expr("$X = get_input()\n...\neval($X)\n");
+        let tree = lower_source("eval(a)\na = get_input()\n").unwrap();
+        assert!(
+            matches(&e, &tree).is_empty(),
+            "reversed order must not match"
+        );
+    }
+
+    #[test]
+    fn it_matches_inside_a_function_body_not_only_at_file_root() {
+        // The reason the enclosing node's kind is not pinned: the same two
+        // statements mean the same thing wherever they appear.
+        let e = expr("$X = get_input()\n...\neval($X)\n");
+        let tree = lower_source("def handler():\n    a = get_input()\n    eval(a)\n").unwrap();
+        assert_eq!(matches(&e, &tree).len(), 1);
+    }
+
+    #[test]
+    fn a_single_statement_pattern_is_unchanged() {
+        // The widening must not alter how ordinary patterns behave.
+        let e = expr("eval($X)");
+        let tree = lower_source("eval(a)\n").unwrap();
+        assert_eq!(matches(&e, &tree).len(), 1);
+        let other = lower_source("exec(a)\n").unwrap();
+        assert!(matches(&e, &other).is_empty());
+    }
+
+    #[test]
+    fn a_bare_call_pattern_does_not_match_a_member_call() {
+        // Moved here from the quiet corpus: `obj.eval(x)` is a different
+        // structure from `eval(x)`, and a rule that wants both must say so.
+        let e = expr("eval($X)");
+        let member = lower_source("obj.eval(a)\n").unwrap();
+        assert!(matches(&e, &member).is_empty());
     }
 }

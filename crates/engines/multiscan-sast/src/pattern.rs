@@ -76,6 +76,27 @@ pub enum PatternNode {
         /// Binding name, or `None` for `$_`.
         name: Option<String>,
     },
+    /// A **statement subsequence**: a multi-statement leaf pattern (ADR 0019).
+    ///
+    /// ```text
+    /// $X = require('buffer')
+    /// ...
+    /// new $X(...)
+    /// ```
+    ///
+    /// Matches a *contiguous run* of children inside any node that has them —
+    /// a module body, a function body, a `try` block — rather than requiring
+    /// the whole node to match. The enclosing node's kind is deliberately not
+    /// pinned: the same two statements mean the same thing at file root and
+    /// inside a function.
+    ///
+    /// The subsequence semantics are intrinsic rather than expressed by adding
+    /// bookend `...` items, so wrapping never inflates a pattern's ellipsis
+    /// count past [`MAX_ELLIPSES_PER_SEQUENCE`].
+    Sequence {
+        /// The statements to find, in order. May contain [`SeqItem::Ellipsis`].
+        items: Vec<SeqItem>,
+    },
 }
 
 impl PatternNode {
@@ -85,8 +106,10 @@ impl PatternNode {
     /// exactly `...`) and doubles the split space for nothing, and more than
     /// [`MAX_ELLIPSES_PER_SEQUENCE`] in one sequence is the O(n^k) case.
     pub fn validate(&self) -> Result<(), PatternError> {
-        let PatternNode::Node { children, .. } = self else {
-            return Ok(());
+        let children = match self {
+            PatternNode::Node { children, .. } => children,
+            PatternNode::Sequence { items } => items,
+            PatternNode::Metavar { .. } => return Ok(()),
         };
 
         let ellipses = children
@@ -116,7 +139,7 @@ impl PatternNode {
     pub fn depth(&self) -> usize {
         match self {
             PatternNode::Metavar { .. } => 1,
-            PatternNode::Node { children, .. } => {
+            PatternNode::Node { children, .. } | PatternNode::Sequence { items: children } => {
                 1 + children
                     .iter()
                     .map(|item| match item {

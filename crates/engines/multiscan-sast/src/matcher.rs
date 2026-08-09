@@ -130,6 +130,49 @@ fn match_node<'a>(
             }
             match_seq(children, &node.children, bindings, budget)
         }
+
+        // A statement subsequence (ADR 0019): find the run anywhere among this
+        // node's children rather than requiring the whole node to match. The
+        // node's own kind is not pinned — the same statements mean the same
+        // thing at file root and inside a function body.
+        PatternNode::Sequence { items } => {
+            if node.children.is_empty() {
+                return None;
+            }
+            // Earliest start wins, so the choice is deterministic rather than
+            // dependent on tree shape (DET-001).
+            (0..node.children.len()).find_map(|start| {
+                match_seq_prefix(items, &node.children[start..], bindings.clone(), budget)
+            })
+        }
+    }
+}
+
+/// Like [`match_seq`], but the node list may have leftovers.
+///
+/// This is what makes a subsequence a subsequence: the pattern must be found,
+/// not consume everything after it.
+fn match_seq_prefix<'a>(
+    items: &[SeqItem],
+    nodes: &'a [Node],
+    bindings: Bindings<'a>,
+    budget: &Budget,
+) -> Option<Bindings<'a>> {
+    if !budget.step() {
+        return None;
+    }
+    match items.split_first() {
+        // Pattern exhausted: whatever follows is not our concern.
+        None => Some(bindings),
+
+        Some((SeqItem::Ellipsis, rest)) => (0..=nodes.len())
+            .find_map(|take| match_seq_prefix(rest, &nodes[take..], bindings.clone(), budget)),
+
+        Some((SeqItem::Node(pattern), rest)) => {
+            let (first, tail) = nodes.split_first()?;
+            let next = match_node(pattern, first, bindings, budget)?;
+            match_seq_prefix(rest, tail, next, budget)
+        }
     }
 }
 
