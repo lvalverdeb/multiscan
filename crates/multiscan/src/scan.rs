@@ -980,6 +980,14 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
             .as_ref()
             .and_then(|f| f.offline)
             .unwrap_or(false);
+    // FR-018: offline output must stay byte-identical, so the two are
+    // rejected together rather than one silently winning.
+    if offline && args.freshness {
+        return Ok(usage(
+            "--freshness contacts the OSV API and --offline forbids all network access; \
+             pick one",
+        ));
+    }
     let max_age_raw = args
         .max_feed_age
         .clone()
@@ -1173,6 +1181,21 @@ pub fn run(args: &ScanArgs) -> Result<Exit> {
         }
     }
 
+    // Freshness stage (FR-018, ADR 0020) — opt-in, never on the default path.
+    // Runs BEFORE dedup so an API-derived finding merges with the native one
+    // for the same package+advisory rather than showing the user a duplicate.
+    if args.freshness {
+        match freshness_findings(&ctx, args.quiet) {
+            Ok(mut extra) => attributed.append(&mut extra),
+            Err(err) => {
+                scan_degraded = true;
+                if !args.quiet {
+                    eprintln!("multiscan: warning: freshness query failed: {err}");
+                }
+            }
+        }
+    }
+
     let merged = multiscan_dedup::merge(attributed);
     let risk_context = RiskContext {
         asset_criticality: config.risk.as_ref().and_then(|r| r.asset_criticality),
@@ -1359,6 +1382,82 @@ fn exploit_signal(
         }
         _ => ExploitSignal::NoCve,
     }
+}
+
+/// Query the OSV API for advisories affecting this repo's packages, and turn
+/// the answers into `RawFinding`s (`T-901`).
+///
+/// Every finding here keys exactly as a native SCA finding would — same purl,
+/// same advisory id, same lockfile path — so the dedup pass merges them and
+/// `sources[]` shows both, rather than reporting one weakness twice (FR-004).
+fn freshness_findings(
+    ctx: &ScanContext,
+    quiet: bool,
+) -> Result<Vec<Attributed>, multiscan_feeds::FeedError> {
+    let inventory = multiscan_sca::resolve_inventory_with_paths(&ctx.root, &ctx.excludes);
+    let purls: Vec<String> = inventory.iter().map(|(p, _)| p.purl()).collect();
+    let path_by_purl: std::collections::BTreeMap<String, String> = inventory
+        .iter()
+        .map(|(p, path)| (p.purl(), path.clone()))
+        .collect();
+
+    let client = multiscan_feeds::FeedClient::new();
+    let fresh =
+        multiscan_feeds::query_freshness(&client, multiscan_feeds::OSV_QUERY_BATCH_URL, &purls)?;
+
+    if fresh.skipped > 0 && !quiet {
+        eprintln!(
+            "multiscan: warning: freshness query covered {} of {} packages ({} skipped past the cap)",
+            purls.len() - fresh.skipped,
+            purls.len(),
+            fresh.skipped
+        );
+    }
+
+    let mut out = Vec::new();
+    for (purl, advisories) in fresh.by_purl {
+        let manifest_path = path_by_purl.get(&purl).cloned().unwrap_or_default();
+        for advisory_id in advisories {
+            out.push(Attributed {
+                engine_id: "multiscan.freshness".to_string(),
+                raw: multiscan_core::RawFinding {
+                    identity: IdentityKey::VulnerableDependency {
+                        purl: purl.clone(),
+                        advisory_id: advisory_id.clone(),
+                        manifest_path: manifest_path.clone(),
+                    },
+                    title: format!("{purl} affected by {advisory_id}"),
+                    description: Some(
+                        "Reported by the OSV query API; may be newer than the pinned snapshot."
+                            .to_string(),
+                    ),
+                    // The API answers "affected", not "how bad". Severity comes
+                    // from enrichment downstream; guessing here would be the
+                    // passthrough ENG-004 forbids.
+                    severity: multiscan_core::Severity::Informational,
+                    confidence: multiscan_core::Confidence::Corroborated,
+                    asset: multiscan_core::Asset {
+                        kind: multiscan_core::AssetKind::Package,
+                        identifier: purl.clone(),
+                    },
+                    location: multiscan_core::Location {
+                        path: manifest_path.clone(),
+                        line: None,
+                    },
+                    evidence: vec![multiscan_core::Evidence {
+                        kind: "osv_api".to_string(),
+                        summary: format!("OSV API reports {advisory_id} affects {purl}"),
+                        detail: serde_json::Map::new(),
+                        dependency_path: vec![],
+                    }],
+                    rule_id: Some(advisory_id.clone()),
+                    remediation: None,
+                    cwe: vec![],
+                },
+            });
+        }
+    }
+    Ok(out)
 }
 
 fn assemble_finding(

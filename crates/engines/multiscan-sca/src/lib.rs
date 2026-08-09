@@ -87,9 +87,25 @@ impl Default for ScaEngine {
 /// same filter the scan ran with, so the SBOM never inventories what the
 /// scan was told not to look at.
 pub fn resolve_inventory(root: &Path, excludes: &PathFilter) -> Vec<ResolvedPackage> {
-    let mut by_purl: std::collections::BTreeMap<String, ResolvedPackage> =
+    resolve_inventory_with_paths(root, excludes)
+        .into_iter()
+        .map(|(package, _)| package)
+        .collect()
+}
+
+/// As [`resolve_inventory`], but keeps the lockfile each package came from.
+///
+/// The freshness path (`T-901`) needs it: a Finding derived from an API answer
+/// must carry the **same** `manifest_path` a native SCA finding would, or the
+/// two key differently and fail to merge (`FR-004`) — a false split that would
+/// show the user one weakness twice.
+pub fn resolve_inventory_with_paths(
+    root: &Path,
+    excludes: &PathFilter,
+) -> Vec<(ResolvedPackage, String)> {
+    let mut by_purl: std::collections::BTreeMap<String, (ResolvedPackage, String)> =
         std::collections::BTreeMap::new();
-    for (abs, _rel, name) in find_lockfiles(root, excludes) {
+    for (abs, rel, name) in find_lockfiles(root, excludes) {
         let Some(parse) = lockfile::parser_for(&name) else {
             continue;
         };
@@ -101,7 +117,7 @@ pub fn resolve_inventory(root: &Path, excludes: &PathFilter) -> Vec<ResolvedPack
         };
         if let Ok(packages) = parse(&text) {
             for package in packages {
-                by_purl.insert(package.purl(), package);
+                by_purl.insert(package.purl(), (package, rel.clone()));
             }
         }
     }

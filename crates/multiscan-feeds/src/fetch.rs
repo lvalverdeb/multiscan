@@ -13,6 +13,10 @@ pub const DEFAULT_ALLOWED_HOSTS: &[&str] = &[
     "osv-vulnerabilities.storage.googleapis.com",
     "epss.cyentia.com",
     "www.cisa.gov",
+    // OSV query API — used only by the opt-in freshness path (T-901,
+    // ADR 0020). Never consulted unless the user asks for it, and never on
+    // the `--offline` path.
+    "api.osv.dev",
 ];
 
 /// Hard cap on any single download (OSV ecosystem zips are the largest).
@@ -82,6 +86,55 @@ impl FeedClient {
             .read_to_vec()
             .map_err(|e| FeedError::Fetch(format!("{url}: body: {e}")))?;
         Ok(bytes)
+    }
+
+    /// POST a JSON body and read a JSON response, under the same allow-list
+    /// and size cap as [`FeedClient::fetch`].
+    ///
+    /// Exists for the OSV query API (`T-901`), which is a **feed** fetch: it
+    /// asks a well-known advisory service about package names. It never
+    /// contacts a scan target, so it stays on this allow-listed path and out
+    /// of `multiscan-scope` (R-6).
+    pub fn post_json(&self, url: &str, body: &[u8]) -> Result<Vec<u8>, FeedError> {
+        self.check_url(url)?;
+        let mut response = self
+            .agent
+            .post(url)
+            .content_type("application/json")
+            .send(body)
+            .map_err(|e| FeedError::Fetch(format!("{url}: {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(FeedError::Fetch(format!("{url}: HTTP {status}")));
+        }
+        response
+            .body_mut()
+            .with_config()
+            .limit(MAX_DOWNLOAD_BYTES)
+            .read_to_vec()
+            .map_err(|e| FeedError::Fetch(format!("{url}: body: {e}")))
+    }
+
+    /// Allow-list and scheme check, applied before any packet is sent.
+    fn check_url(&self, url: &str) -> Result<(), FeedError> {
+        let uri: ureq::http::Uri = url
+            .parse()
+            .map_err(|_| FeedError::BadUrl(url.to_string()))?;
+        let host = uri
+            .host()
+            .ok_or_else(|| FeedError::BadUrl(url.to_string()))?
+            .to_string();
+        let loopback = host == "127.0.0.1" || host == "localhost" || host == "::1";
+        if !self.allowed.contains(&host) {
+            return Err(FeedError::NotAllowed(host));
+        }
+        match uri.scheme_str() {
+            Some("https") => Ok(()),
+            Some("http") if loopback => Ok(()),
+            _ => Err(FeedError::BadUrl(format!(
+                "{url}: feeds require https (http allowed for loopback tests only)"
+            ))),
+        }
     }
 }
 

@@ -115,6 +115,15 @@ pub struct ScanArgs {
     #[arg(long, global = true)]
     pub offline: bool,
 
+    /// Also query the OSV API for advisories newer than the pinned snapshot.
+    ///
+    /// Opt-in by design (FR-018, ADR 0020): the local mirror is the default
+    /// posture, and without this flag only the snapshot is consulted. Sends
+    /// package coordinates — already public in a lockfile — to the OSV API and
+    /// nothing else. Conflicts with `--offline`.
+    #[arg(long)]
+    pub freshness: bool,
+
     /// Maximum acceptable advisory-data age, e.g. 7d.
     #[arg(long)]
     pub max_feed_age: Option<String>,

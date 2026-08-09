@@ -660,7 +660,7 @@ phase_6_polish:
 
 | ID | Question | Status | Conservative default (R-7) |
 |---|---|---|---|
-| Q-01 | Full OSV mirror vs API queries? | Open | Local mirror; API only as an explicit opt-in for freshness. Offline is the default posture. |
+| Q-01 | Full OSV mirror vs API queries? | **Resolved (ADR 0020)** | Local mirror is the default posture; the OSV API is an explicit `--freshness` opt-in, mutually exclusive with `--offline`. |
 | Q-02 | Reachability analysis for SCA (is the vulnerable symbol called?) | Deferred to v2 | Omit factor; treat as unknown. Do not guess. |
 | Q-03 | Rule pack distribution: embedded vs downloadable? | Open | Embedded for secrets/IaC (FD-007); downloadable for OSV. |
 | Q-04 | Semgrep rule syntax compatibility in v2 SAST | Resolved by ADR 0014 | A defined Semgrep subset (`MS-PAT-1`) with a mechanically translated corpus — the original "own minimal syntax" default died with ADR 0013's authorship constraint. |

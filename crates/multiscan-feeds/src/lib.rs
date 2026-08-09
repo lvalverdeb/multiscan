@@ -13,6 +13,7 @@ mod bundle;
 mod cache;
 mod enrich;
 mod fetch;
+mod freshness;
 mod signing;
 mod update;
 
@@ -23,6 +24,9 @@ pub use cache::{
 };
 pub use enrich::Enrichment;
 pub use fetch::{FeedClient, DEFAULT_ALLOWED_HOSTS};
+pub use freshness::{
+    query as query_freshness, ApiFreshness, MAX_QUERIED_PACKAGES, OSV_QUERY_BATCH_URL,
+};
 pub use signing::{load_or_create_signing_key, parse_public_key_hex, public_key_bytes, to_hex};
 pub use update::{update, FeedSources};
 

@@ -28,6 +28,7 @@ rewrite.
 | [0017](0017-reachability-risk-factor.md) | The risk formula gains a sixth factor — module-level reachability | Accepted | **Amends** §8 and FR-008 |
 | [0018](0018-parse-timeout.md) | Bound source parsing with a worker-thread timeout | Accepted | Extends §7.5; resolves phase-2 Q-12 |
 | [0019](0019-ms-pat-1-statement-subsequence.md) | `MS-PAT-1` gains statement-subsequence patterns | Accepted | Extends ADR 0014; resolves phase-2 Q-13 |
+| [0020](0020-osv-freshness-opt-in.md) | OSV API freshness is opt-in; the mirror stays the default | Accepted | Extends §10/§7.1; resolves §17 Q-01 |
 
 ## Conventions
 
