@@ -10,8 +10,10 @@
 
 mod checkov;
 mod common;
+mod cyclonedx;
 mod sarif;
 mod semgrep;
+mod spdx;
 mod trivy;
 mod zap;
 
@@ -43,6 +45,10 @@ pub enum Format {
     Checkov,
     /// OWASP ZAP JSON.
     Zap,
+    /// CycloneDX BOM — the optional `vulnerabilities[]` (VEX) section.
+    CycloneDx,
+    /// SPDX document — `SECURITY`/`advisory` external references.
+    Spdx,
 }
 
 impl Format {
@@ -54,6 +60,8 @@ impl Format {
             Format::Semgrep => "semgrep",
             Format::Checkov => "checkov",
             Format::Zap => "zap",
+            Format::CycloneDx => "cyclonedx",
+            Format::Spdx => "spdx",
         }
     }
 }
@@ -88,6 +96,18 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
     {
         return Some(Format::Checkov);
     }
+    // CycloneDX: self-identifying via `bomFormat`.
+    if obj
+        .get("bomFormat")
+        .and_then(|b| b.as_str())
+        .is_some_and(|b| b.eq_ignore_ascii_case("CycloneDX"))
+    {
+        return Some(Format::CycloneDx);
+    }
+    // SPDX: self-identifying via `spdxVersion`.
+    if obj.get("spdxVersion").and_then(|v| v.as_str()).is_some() {
+        return Some(Format::Spdx);
+    }
     // ZAP: a `site` array of alert containers.
     if obj.get("site").and_then(|s| s.as_array()).is_some() {
         return Some(Format::Zap);
@@ -113,6 +133,8 @@ pub fn detect(bytes: &[u8]) -> Option<Format> {
 pub fn import_as(format: Format, bytes: &[u8]) -> Result<Vec<Finding>, BridgeError> {
     match format {
         Format::Sarif => import_sarif(bytes),
+        Format::CycloneDx => cyclonedx::import(bytes),
+        Format::Spdx => spdx::import(bytes),
         Format::Trivy => trivy::import(bytes),
         Format::Semgrep => semgrep::import(bytes),
         Format::Checkov => checkov::import(bytes),
