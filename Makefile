@@ -78,8 +78,11 @@ bump:
 	@echo "bumping $(VERSION) -> $(TO)"
 	# workspace.package version (the lone top-level `version = "..."`).
 	sed -i.bak 's/^version = "$(VERSION)"/version = "$(TO)"/' Cargo.toml
-	# internal path-dep versions must track the workspace version.
-	sed -i.bak -E 's/(multiscan-[a-z]+ = \{ path = "[^"]+", version = )"$(VERSION)"/\1"$(TO)"/' Cargo.toml
+	# Internal path-dep versions must track the workspace version. Matches ANY
+	# version rather than the current one: at 0.2.1 these were left at 0.2.0
+	# (a patch bump still satisfied `^0.2.0`), so keying off $(VERSION) silently
+	# did nothing and only failed at the next minor bump.
+	sed -i.bak -E 's/(multiscan-[a-z]+ = \{ path = "[^"]+", version = )"[0-9]+\.[0-9]+\.[0-9]+"/\1"$(TO)"/' Cargo.toml
 	rm -f Cargo.toml.bak
 	cargo update --workspace --quiet
 	git add Cargo.toml Cargo.lock
