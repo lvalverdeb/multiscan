@@ -5,6 +5,7 @@
 //! matching uses each ecosystem's own ordering (SCA-002); a malformed file
 //! degrades to `Partial`, never aborts the scan.
 
+pub(crate) mod distro;
 pub mod image;
 mod lockfile;
 pub(crate) mod osv;
@@ -20,6 +21,8 @@ use multiscan_core::{
 use multiscan_engine::{
     Applicability, Engine, EngineError, EngineOutcome, FindingSink, PathFilter, ScanContext,
 };
+
+use crate::osv::EcoKey;
 
 pub use lockfile::ResolvedPackage;
 pub use osv::Advisory;
@@ -204,39 +207,94 @@ fn find_lockfiles(root: &Path, excludes: &PathFilter) -> Vec<(PathBuf, String, S
     finish_discovery(found)
 }
 
-/// OSV advisories indexed by lowercased package name, per ecosystem.
+/// Which of a snapshot's `osv/*.jsonl` files to load (ADR 0022 §4).
+///
+/// A full snapshot is now ~4.5 GB of JSONL, of which the distro ecosystems are
+/// ~4 GB, so loading every file the way the lockfile path once did would put
+/// `NFR-003` (500 MB peak RSS) out of reach. Each scan path loads only what it
+/// can match against.
+pub(crate) enum FeedSelector {
+    /// Every non-distro ecosystem — what a lockfile scan can resolve against.
+    Lockfiles,
+    /// One distro release. Selects its bucket, e.g. `Debian` (ADR 0022 §2).
+    Distro(distro::DistroKey),
+}
+
+impl FeedSelector {
+    /// Does this selector want the file `osv/<stem>.jsonl`?
+    ///
+    /// A stem may be release-qualified (`Debian:12`) rather than a bare bucket
+    /// name: `db update` writes bare names, but a hand-built air-gap bundle
+    /// imported before ADR 0022 may carry either.
+    fn wants_file(&self, stem: &str) -> bool {
+        let base = stem.split(':').next().unwrap_or(stem);
+        match self {
+            FeedSelector::Lockfiles => !distro::DISTRO_BUCKETS.contains(&base),
+            FeedSelector::Distro(key) => base == key.bucket(),
+        }
+    }
+
+    /// Does this selector want records under `key`?
+    ///
+    /// Selecting the file is not enough to bound memory: a distro bucket holds
+    /// every release of that distro (`Ubuntu` carries 14.04 through 24.04 plus
+    /// every Pro variant), and an image can only ever match one of them. A
+    /// 22.04 scan that indexed the whole bucket would hold roughly ten times
+    /// the advisories it can use — the difference between `NFR-003` being
+    /// reachable and not.
+    fn wants_record(&self, key: &EcoKey) -> bool {
+        match self {
+            FeedSelector::Lockfiles => true,
+            FeedSelector::Distro(wanted) => matches!(key, EcoKey::Distro(k) if k == wanted),
+        }
+    }
+}
+
+/// OSV advisories indexed by lowercased package name, per ecosystem key.
 pub(crate) struct OsvIndex {
-    by_name: BTreeMap<String, BTreeMap<String, Vec<Advisory>>>,
+    by_name: BTreeMap<EcoKey, BTreeMap<String, Vec<Advisory>>>,
 }
 
 impl OsvIndex {
     fn load(ctx: &ScanContext) -> Option<Self> {
-        Self::from_cache(ctx.feed_cache_dir.as_deref()?)
+        Self::from_cache(ctx.feed_cache_dir.as_deref()?, &FeedSelector::Lockfiles)
     }
 
-    /// Load the OSV index from the snapshot pinned in `cache`.
-    pub(crate) fn from_cache(cache: &Path) -> Option<Self> {
+    /// Load the OSV index from the snapshot pinned in `cache`, restricted to
+    /// the files `selector` wants.
+    pub(crate) fn from_cache(cache: &Path, selector: &FeedSelector) -> Option<Self> {
         let snapshot = multiscan_feeds::current_snapshot(cache).ok()??;
-        let mut by_name: BTreeMap<String, BTreeMap<String, Vec<Advisory>>> = BTreeMap::new();
+        let mut by_name: BTreeMap<EcoKey, BTreeMap<String, Vec<Advisory>>> = BTreeMap::new();
         for name in snapshot.manifest.files.keys() {
-            let Some(ecosystem) = name
+            let Some(stem) = name
                 .strip_prefix("osv/")
                 .and_then(|n| n.strip_suffix(".jsonl"))
             else {
                 continue;
             };
+            if !selector.wants_file(stem) {
+                continue;
+            }
             let Ok(bytes) = snapshot.read_file(name) else {
                 continue;
             };
-            let index = by_name.entry(ecosystem.to_string()).or_default();
             for line in bytes.split(|b| *b == b'\n') {
                 if line.is_empty() {
                     continue;
                 }
                 if let Ok(advisory) = serde_json::from_slice::<Advisory>(line) {
+                    // Key on the record's own ecosystem, not the file it
+                    // arrived in: a base bucket holds every release, and
+                    // cross-lists other distros besides (ADR 0022 §3).
                     for affected in &advisory.affected {
                         if let Some(pkg) = &affected.package {
-                            index
+                            let key = EcoKey::for_record(&pkg.ecosystem);
+                            if !selector.wants_record(&key) {
+                                continue;
+                            }
+                            by_name
+                                .entry(key)
+                                .or_default()
                                 .entry(pkg.name.to_ascii_lowercase())
                                 .or_default()
                                 .push(advisory.clone());
@@ -245,12 +303,24 @@ impl OsvIndex {
                 }
             }
         }
+        // One advisory listing a package twice — or reached through two
+        // cross-listing buckets — must not emit two identical findings.
+        for packages in by_name.values_mut() {
+            for advisories in packages.values_mut() {
+                advisories.sort_by(|a, b| a.id.cmp(&b.id));
+                advisories.dedup_by(|a, b| a.id == b.id);
+            }
+        }
         Some(Self { by_name })
     }
 
     pub(crate) fn advisories_for(&self, ecosystem: &str, name: &str) -> &[Advisory] {
+        self.advisories_for_key(&EcoKey::for_record(ecosystem), name)
+    }
+
+    pub(crate) fn advisories_for_key(&self, key: &EcoKey, name: &str) -> &[Advisory] {
         self.by_name
-            .get(ecosystem)
+            .get(key)
             .and_then(|m| m.get(&name.to_ascii_lowercase()))
             .map(Vec::as_slice)
             .unwrap_or(&[])

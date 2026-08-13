@@ -23,6 +23,7 @@ fn seed_snapshot(cache: &Path, age: Duration) -> String {
             osv: BTreeMap::new(),
         },
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     let snapshot = write_snapshot(cache, &data, Utc::now() - age).unwrap();
     snapshot.manifest.snapshot_id

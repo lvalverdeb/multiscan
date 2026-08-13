@@ -73,6 +73,36 @@ fn import(bundle: &std::path::Path, trusted_key: Option<&str>) -> Result<Exit> {
 
 fn update() -> Result<Exit> {
     let mut sources = FeedSources::default();
+    // ADR 0022 §1: the default set now carries ~4.5 GB of advisory data, most
+    // of it distro ecosystems. `[feeds] osv_ecosystems` is how an operator
+    // trims it — a replacement, not an addition, so the config reads as the
+    // set that will be mirrored.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    // A config we cannot parse is an error, not a reason to quietly fetch the
+    // default 4.5 GB: an operator who typo'd the key would otherwise get the
+    // full set with no diagnostic and no way to tell.
+    let config = match crate::configfile::load(None, &cwd) {
+        Ok((config, _)) => config,
+        Err(err) => {
+            eprintln!("multiscan: error: {err:#}");
+            return Ok(Exit::Usage);
+        }
+    };
+    let ecosystems = config
+        .feeds
+        .as_ref()
+        .map(|f| f.osv_ecosystems.clone())
+        .unwrap_or_default();
+    if !ecosystems.is_empty() {
+        if let Some(bad) = ecosystems.iter().find(|e| e.contains(':')) {
+            eprintln!(
+                "multiscan: error: [feeds] osv_ecosystems: `{bad}` is release-qualified; \
+                 mirror the base ecosystem instead (it carries every release)"
+            );
+            return Ok(Exit::Usage);
+        }
+        sources.osv_ecosystems = ecosystems;
+    }
     // Opt-in secrets rule-pack feed (ADR 0010). Setting MULTISCAN_RULES_URL
     // both configures the fetch and — since the operator explicitly chose
     // this host — allow-lists it for the feed client (R-6: the allow-list
@@ -121,6 +151,11 @@ fn status() -> Result<Exit> {
             println!("epss       {} scores", m.counts.epss);
             for (ecosystem, count) in &m.counts.osv {
                 println!("osv        {ecosystem}: {count} advisories");
+            }
+            // ADR 0022 §8: an ecosystem the snapshot does not carry is a gap
+            // in coverage, not an ecosystem with nothing in it. Say so.
+            for (ecosystem, reason) in &m.skipped_ecosystems {
+                println!("osv        {ecosystem}: SKIPPED — {reason}");
             }
             for (name, meta) in &m.files {
                 println!("file       {name}  {}  {} bytes", meta.digest, meta.bytes);

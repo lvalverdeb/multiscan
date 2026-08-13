@@ -107,6 +107,20 @@ expires = "2026-11-01"
         assert!(config.gate.is_some());
     }
 
+    /// ADR 0022: the mirror set is configurable, and it replaces the default
+    /// rather than adding to it, so the config reads as what will be fetched.
+    #[test]
+    fn feeds_ecosystems_parse() {
+        let config: Config =
+            toml::from_str("[feeds]\nosv_ecosystems = [\"npm\", \"Debian\", \"Red Hat\"]\n")
+                .expect("osv_ecosystems is a valid feeds key");
+        let feeds = config.feeds.expect("feeds section");
+        assert_eq!(feeds.osv_ecosystems, ["npm", "Debian", "Red Hat"]);
+        // Absent key ⇒ empty ⇒ the default set stands.
+        let bare: Config = toml::from_str("[feeds]\nmax_age = \"7d\"\n").unwrap();
+        assert!(bare.feeds.unwrap().osv_ecosystems.is_empty());
+    }
+
     #[test]
     fn severity_fail_on_parses() {
         let config: Config = toml::from_str("[gate]\nfail_on = \"high\"\n").unwrap();

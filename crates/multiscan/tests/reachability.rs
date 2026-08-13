@@ -37,6 +37,7 @@ fn seed_snapshot(cache: &Path) {
             osv: osv_counts,
         },
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     write_snapshot(cache, &data, Utc::now()).unwrap();
 }

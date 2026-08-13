@@ -309,6 +309,7 @@ fn seed_snapshot(cache: &std::path::Path, labels: &Value) -> Result<()> {
             osv: osv_counts,
         },
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     // Fresh timestamp so the snapshot is not stale under --offline (FD-004).
     write_snapshot(cache, &data, chrono::Utc::now()).context("seeding snapshot")?;

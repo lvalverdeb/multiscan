@@ -41,19 +41,37 @@ pub struct PathFilter {
     ignore: crate::ignorefile::IgnoreSet,
 }
 
+/// Expand one configured pattern into the globs actually compiled. A trailing
+/// `/` is the universal "this directory" spelling (`.gitignore`, every ignore
+/// file, every other scanner) but matches nothing here, because paths are
+/// matched without one: `.venv/` silently excluded no files at all. Normalise
+/// it to the pair a user means — the directory itself, to prune the walk, and
+/// everything beneath it (CLI-007).
+fn expand(pattern: &str) -> Vec<String> {
+    match pattern.trim_end_matches('/') {
+        "" => vec![pattern.to_string()],
+        base if base.len() < pattern.len() => vec![base.to_string(), format!("{base}/**")],
+        _ => vec![pattern.to_string()],
+    }
+}
+
 fn compile(patterns: &[String], section: &str) -> Result<GlobSet, PathFilterError> {
     let mut builder = GlobSetBuilder::new();
-    for pattern in patterns {
-        let glob = GlobBuilder::new(pattern)
-            // `foo` and `FOO` are different paths; excludes are exact.
-            .case_insensitive(false)
-            .build()
-            .map_err(|e| PathFilterError {
-                pattern: pattern.clone(),
-                section: section.to_string(),
-                reason: e.kind().to_string(),
-            })?;
-        builder.add(glob);
+    for configured in patterns {
+        for pattern in expand(configured) {
+            let glob = GlobBuilder::new(&pattern)
+                // `foo` and `FOO` are different paths; excludes are exact.
+                .case_insensitive(false)
+                .build()
+                .map_err(|e| PathFilterError {
+                    // The diagnostic quotes what the user wrote, not what the
+                    // trailing-slash expansion produced.
+                    pattern: configured.clone(),
+                    section: section.to_string(),
+                    reason: e.kind().to_string(),
+                })?;
+            builder.add(glob);
+        }
     }
     builder.build().map_err(|e| PathFilterError {
         pattern: patterns.join(", "),
@@ -211,6 +229,25 @@ mod tests {
         // The dir itself matches (prune) and so does anything beneath it.
         assert!(filter.is_excluded(Layer::Secrets, ".venv"));
         assert!(filter.is_excluded(Layer::Secrets, ".venv/lib/site.py"));
+    }
+
+    /// A trailing `/` means "this directory" everywhere else, so it must mean
+    /// it here too — before the fix it compiled to a glob that matched no path
+    /// at all, silently disabling the exclude.
+    #[test]
+    fn trailing_slash_excludes_the_directory_and_its_contents() {
+        let cfg: Config = serde_json::from_value(serde_json::json!({
+            "scan": { "exclude": [".mypy_cache/", ".venv/", "*.egg-info/"] }
+        }))
+        .unwrap();
+        let filter = PathFilter::from_config(&cfg).unwrap();
+        assert!(filter.is_excluded(Layer::Secrets, ".mypy_cache"));
+        assert!(filter.is_excluded(Layer::Secrets, ".mypy_cache/3.14/logging.json"));
+        assert!(filter.is_excluded(Layer::Sca, ".venv/lib/site.py"));
+        assert!(filter.is_excluded(Layer::Secrets, "boti_data.egg-info/PKG-INFO"));
+        // Unrelated paths are untouched: the slash does not widen the match.
+        assert!(!filter.is_excluded(Layer::Secrets, "src/mypy_cache_helper.py"));
+        assert!(!filter.is_excluded(Layer::Secrets, "not-a.venv"));
     }
 
     #[test]

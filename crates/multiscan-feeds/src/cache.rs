@@ -71,6 +71,13 @@ pub struct SnapshotManifest {
     pub counts: SnapshotCounts,
     /// Feed name → source URL the data came from.
     pub sources: BTreeMap<String, String>,
+    /// OSV ecosystems that were requested but could not be fetched or parsed,
+    /// mapped to the reason (ADR 0022 §8). A snapshot missing an ecosystem
+    /// otherwise looks exactly like one that found nothing in it, so the gap
+    /// travels with the data and `db status` prints it. Defaulted so manifests
+    /// written before ADR 0022 still deserialize.
+    #[serde(default)]
+    pub skipped_ecosystems: BTreeMap<String, String>,
 }
 
 /// A loaded, pinned snapshot.
@@ -99,6 +106,9 @@ pub struct SnapshotData {
     pub counts: SnapshotCounts,
     /// Feed name → source URL.
     pub sources: BTreeMap<String, String>,
+    /// Requested OSV ecosystems that were skipped, with the reason
+    /// (ADR 0022 §8).
+    pub skipped_ecosystems: BTreeMap<String, String>,
 }
 
 fn feeds_dir(cache: &Path) -> PathBuf {
@@ -189,7 +199,11 @@ pub fn write_snapshot(
     files.insert("kev.json".to_string(), &data.kev_json);
     files.insert("epss.csv".to_string(), &data.epss_csv);
     for (ecosystem, jsonl) in &data.osv_jsonl {
-        if ecosystem.contains(['/', '\\']) || ecosystem.contains("..") {
+        // `:` joins the rest: a release-qualified name such as
+        // `Ubuntu:22.04:LTS` is not a legal filename on Windows, and NFR-007
+        // requires a snapshot to be extractable on every supported platform.
+        // ADR 0022 mirrors base ecosystem names for exactly this reason.
+        if ecosystem.contains(['/', '\\', ':']) || ecosystem.contains("..") {
             return Err(FeedError::Corrupt(format!(
                 "invalid ecosystem name `{ecosystem}`"
             )));
@@ -231,6 +245,7 @@ pub fn write_snapshot(
         files: metas,
         counts: data.counts.clone(),
         sources: data.sources.clone(),
+        skipped_ecosystems: data.skipped_ecosystems.clone(),
     };
 
     let snapshots_dir = feeds_dir(cache).join("snapshots");

@@ -35,6 +35,7 @@ fn seed_snapshot(cache: &Path) -> String {
             osv: osv_counts,
         },
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     write_snapshot(cache, &data, Utc::now())
         .unwrap()
@@ -181,6 +182,7 @@ fn uv_lock_resolves_pypi_advisory_offline() {
             osv: osv_counts,
         },
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     write_snapshot(cache.path(), &data, Utc::now()).unwrap();
 
@@ -240,6 +242,7 @@ fn seed_ecosystems(cache: &Path, advisories: &[(&str, &str)]) {
             osv: osv_counts,
         },
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     write_snapshot(cache, &data, Utc::now()).unwrap();
 }

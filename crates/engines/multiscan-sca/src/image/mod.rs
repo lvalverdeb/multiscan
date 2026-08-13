@@ -58,16 +58,24 @@ pub fn scan_os_packages(dest: &Path, image_digest: &str, feed_cache: Option<&Pat
     };
 
     let mut findings = Vec::new();
-    let index = feed_cache.and_then(crate::OsvIndex::from_cache);
+    // Load only this distro's bucket, not the whole snapshot (ADR 0022 §4).
+    let distro_key = os.as_ref().and_then(|os| os.distro_key());
+    let index = match (feed_cache, &distro_key) {
+        (Some(cache), Some(key)) => {
+            crate::OsvIndex::from_cache(cache, &crate::FeedSelector::Distro(key.clone()))
+        }
+        _ => None,
+    };
 
-    if let (Some(os), Some(index)) = (&os, &index) {
-        if let (Some(ecosystem), namespace, purl_type) =
-            (os.osv_ecosystem(), os.purl_namespace(), os.purl_type())
-        {
+    match (&os, &distro_key, &index) {
+        (Some(os), Some(key), Some(index)) => {
+            let (namespace, purl_type) = (os.purl_namespace(), os.purl_type());
+            let eco_key = crate::osv::EcoKey::Distro(key.clone());
+            let label = key.display();
             for pkg in &packages {
                 let purl = format!("pkg:{purl_type}/{namespace}/{}@{}", pkg.name, pkg.version);
-                for advisory in index.advisories_for(&ecosystem, &pkg.name) {
-                    let Some(m) = advisory.matches(&ecosystem, &pkg.name, &pkg.version) else {
+                for advisory in index.advisories_for_key(&eco_key, &pkg.name) {
+                    let Some(m) = advisory.matches_key(&eco_key, &pkg.name, &pkg.version) else {
                         continue;
                     };
                     findings.push(container_finding(
@@ -76,13 +84,25 @@ pub fn scan_os_packages(dest: &Path, image_digest: &str, feed_cache: Option<&Pat
                         advisory,
                         &m,
                         pkg,
-                        &ecosystem,
+                        &label,
                     ));
                 }
             }
         }
-    } else if os.is_some() && index.is_none() && partial.is_none() {
-        partial = Some("no feed snapshot; OS package enrichment unavailable".to_string());
+        // A detected OS we cannot resolve advisories for is a degradation, not
+        // a clean empty result (ADR 0022 §9): Fedora has no OSV bucket, Debian
+        // sid publishes no VERSION_ID, and Arch has no package database parser
+        // here. Reporting Complete would read as "nothing to fix".
+        (Some(os), None, _) if partial.is_none() => {
+            partial = Some(format!(
+                "no advisory data for OS `{}`; OS packages not resolved",
+                os.id
+            ));
+        }
+        (Some(_), Some(_), None) if partial.is_none() => {
+            partial = Some("no feed snapshot; OS package enrichment unavailable".to_string());
+        }
+        _ => {}
     }
 
     ImageScan {
@@ -99,7 +119,7 @@ fn container_finding(
     advisory: &crate::Advisory,
     m: &crate::osv::Match,
     pkg: &OsPackage,
-    ecosystem: &str,
+    distro: &str,
 ) -> RawFinding {
     let mut detail = serde_json::Map::new();
     let cves = advisory.cve_aliases();
@@ -132,12 +152,12 @@ fn container_finding(
             identifier: image_digest.to_string(),
         },
         location: Location {
-            path: format!("{ecosystem} package {}", pkg.name),
+            path: format!("{distro} package {}", pkg.name),
             line: None,
         },
         evidence: vec![Evidence {
             kind: "os_package".to_string(),
-            summary: format!("{}@{} in {ecosystem}", pkg.name, pkg.version),
+            summary: format!("{}@{} in {distro}", pkg.name, pkg.version),
             detail,
             dependency_path: vec![purl.to_string()],
         }],

@@ -275,7 +275,8 @@ impl SecretsEngine {
             // line, to avoid double-reporting the same secret. Capped at
             // Medium/Heuristic (SEC-103). Skipped entirely on known-noise
             // files, and per-token for content-address shapes — digests,
-            // UUIDs, URL-embedded runs (ADR 0005).
+            // UUIDs, URL-embedded runs (ADR 0005) — and for source shapes:
+            // identifiers and filesystem paths (ADR 0021).
             if !matched_here && entropy_enabled {
                 let Some(token) = &self.token else { continue };
                 for m in token.find_iter(line) {
@@ -283,6 +284,7 @@ impl SecretsEngine {
                     if noise::digest_shaped(candidate)
                         || noise::uuid_shaped(candidate)
                         || noise::in_url_context(line, m.start())
+                        || noise::source_shaped(candidate)
                     {
                         continue;
                     }

@@ -47,6 +47,7 @@ fn seed_empty_snapshot(cache: &Path) {
             osv: BTreeMap::new(),
         },
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     write_snapshot(cache, &data, Utc::now()).unwrap();
 }

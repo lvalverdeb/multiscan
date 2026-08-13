@@ -181,6 +181,56 @@ fn content_address_shapes_not_flagged() {
     );
 }
 
+/// ADR 0021: ordinary source — long identifiers, test names, filesystem paths
+/// — must not reach the entropy fallback, while a credential sitting in the
+/// same file still does. This is the regression that mattered: a real scan of
+/// a Python workspace returned 697 entropy findings, all but a handful of them
+/// identifiers, which buried the credentials that were genuinely there.
+#[test]
+fn source_identifiers_and_paths_not_flagged() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("cubes.py"),
+        concat!(
+            "from ._actions import PafActionsTrackerCube, PafActionsRecordsCube\n",
+            "from .people import _HybridEngineBoundDatasetFactory\n",
+            "MAGIC_NUMBER_WELL_KNOWN_PORTS = 1024\n",
+            "CACHE = \"/var/folders/j1/T/boti_sql_manager/warehouse/events\"\n",
+            "def test_parquet_reader_supports_lazy_dask_with_explicit_pyarrow_fs():\n",
+            "    return build_arrow_schema_from_meta_dtypes(Postgres/MySQL/ClickHouse)\n",
+        ),
+    )
+    .unwrap();
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        findings.as_array().unwrap().is_empty(),
+        "source shapes flagged: {findings:?}"
+    );
+
+    // Control: a credential in the same shape of file is still found, and so
+    // is one embedded in an otherwise ordinary path.
+    std::fs::write(
+        project.path().join("settings.py"),
+        concat!(
+            "REGISTRY_TOKEN = \"zqR4tL8vNb2xJd6mKp0wYc3sHf9gTa5eUiO\"\n",
+            "KEYFILE = \"/opt/app/config/Qm9ndXNLZXlGb3JUZXN0aW5nT25seU5vdA\"\n",
+        ),
+    )
+    .unwrap();
+    let out = scan(project.path(), &["--format", "json", "--no-store"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let arr = findings.as_array().unwrap();
+    assert_eq!(
+        arr.iter()
+            .filter(|f| f["identity"]["rule_id"] == "high-entropy-string")
+            .count(),
+        2,
+        "narrowed heuristic must still catch credentials: {arr:?}"
+    );
+    assert!(finding_paths_contain(&findings, "settings.py"));
+}
+
 fn finding_paths_contain(findings: &serde_json::Value, path: &str) -> bool {
     findings
         .as_array()

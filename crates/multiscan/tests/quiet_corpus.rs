@@ -141,6 +141,7 @@ fn seed_sast_pack(cache: &std::path::Path) {
                 osv: BTreeMap::new(),
             },
             sources: BTreeMap::new(),
+            skipped_ecosystems: Default::default(),
         },
         chrono::Utc::now(),
     )

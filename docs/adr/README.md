@@ -29,6 +29,9 @@ rewrite.
 | [0018](0018-parse-timeout.md) | Bound source parsing with a worker-thread timeout | Accepted | Extends §7.5; resolves phase-2 Q-12 |
 | [0019](0019-ms-pat-1-statement-subsequence.md) | `MS-PAT-1` gains statement-subsequence patterns | Accepted | Extends ADR 0014; resolves phase-2 Q-13 |
 | [0020](0020-osv-freshness-opt-in.md) | OSV API freshness is opt-in; the mirror stays the default | Accepted | Extends §10/§7.1; resolves §17 Q-01 |
+| [0021](0021-entropy-source-shapes.md) | Source shapes — identifiers and paths — are exempt from the entropy fallback | Accepted | Extends §7.2 and ADR 0005; widens FP-001 past machine-generated content, keeps FP-002 |
+| [0022](0022-distro-osv-ecosystems.md) | Mirror the distro OSV ecosystems, and match them on a normalized distro key | Accepted | Extends §10/§7.1; realizes FR-002 for OS packages |
+| [0023](0023-distro-advisory-cve-identity.md) | Distro advisories carry their CVE in `related`/`upstream` — key identity on it | Accepted | **Amends** §7.7.2 identity tuples (extends ADR 0012) |
 
 ## Conventions
 

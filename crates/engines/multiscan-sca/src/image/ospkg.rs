@@ -32,32 +32,21 @@ pub struct OsRelease {
 }
 
 impl OsRelease {
-    /// The release-qualified OSV ecosystem (e.g. `Debian:11`, `Alpine:v3.20`),
-    /// or `None` if we cannot form one.
-    pub fn osv_ecosystem(&self) -> Option<String> {
-        let v = self.version_id.as_deref();
-        match self.id.as_str() {
-            "debian" => v.map(|v| format!("Debian:{}", v.split('.').next().unwrap_or(v))),
-            "ubuntu" => v.map(|v| format!("Ubuntu:{v}")),
-            "alpine" => v.map(|v| {
-                // OSV uses the minor series, e.g. Alpine:v3.20.
-                let series: Vec<&str> = v.split('.').take(2).collect();
-                format!("Alpine:v{}", series.join("."))
-            }),
-            // rpm distros. OSV names: "Red Hat" (unqualified), "Rocky Linux:9",
-            // "AlmaLinux:9", "Fedora:39".
-            "rhel" | "centos" => Some("Red Hat".to_string()),
-            "rocky" => v.map(|v| format!("Rocky Linux:{}", v.split('.').next().unwrap_or(v))),
-            "almalinux" => v.map(|v| format!("AlmaLinux:{}", v.split('.').next().unwrap_or(v))),
-            "fedora" => v.map(|v| format!("Fedora:{v}")),
-            _ => None,
-        }
+    /// This release's normalized identity, or `None` when we cannot resolve
+    /// one — an unknown distro, a Debian sid image (no `VERSION_ID`), or a
+    /// distro OSV publishes no advisories for, such as Fedora (ADR 0022 §9).
+    ///
+    /// Matching goes through the key rather than an ecosystem string because
+    /// OSV spells these releases differently than `os-release` does; see
+    /// [`crate::distro`].
+    pub(crate) fn distro_key(&self) -> Option<crate::distro::DistroKey> {
+        crate::distro::from_os_release(&self.id, self.version_id.as_deref())
     }
 
     /// The purl type for packages of this OS.
     pub fn purl_type(&self) -> &str {
         match self.id.as_str() {
-            "alpine" => "apk",
+            "alpine" | "wolfi" | "chainguard" => "apk",
             "debian" | "ubuntu" => "deb",
             _ => "rpm",
         }
@@ -238,19 +227,43 @@ mod tests {
     }
 
     #[test]
-    fn os_release_ecosystems() {
+    fn os_release_distro_keys() {
         let debian = OsRelease {
             id: "debian".into(),
             version_id: Some("11".into()),
         };
-        assert_eq!(debian.osv_ecosystem().as_deref(), Some("Debian:11"));
+        assert_eq!(
+            debian.distro_key(),
+            crate::distro::from_osv_ecosystem("Debian:11")
+        );
         assert_eq!(debian.purl_type(), "deb");
 
         let alpine = OsRelease {
             id: "alpine".into(),
             version_id: Some("3.20.3".into()),
         };
-        assert_eq!(alpine.osv_ecosystem().as_deref(), Some("Alpine:v3.20"));
+        assert_eq!(
+            alpine.distro_key(),
+            crate::distro::from_osv_ecosystem("Alpine:v3.20")
+        );
         assert_eq!(alpine.purl_type(), "apk");
+
+        // The mapping OSV actually publishes for Ubuntu carries an `:LTS`
+        // suffix; a release-string comparison would miss it (ADR 0022).
+        let ubuntu = OsRelease {
+            id: "ubuntu".into(),
+            version_id: Some("22.04".into()),
+        };
+        assert_eq!(
+            ubuntu.distro_key(),
+            crate::distro::from_osv_ecosystem("Ubuntu:22.04:LTS")
+        );
+
+        // Debian sid publishes no VERSION_ID, so it resolves to nothing.
+        let sid = OsRelease {
+            id: "debian".into(),
+            version_id: None,
+        };
+        assert_eq!(sid.distro_key(), None);
     }
 }

@@ -51,6 +51,7 @@ fn seed(cache: &Path, pack: Option<Vec<u8>>) {
             osv: BTreeMap::new(),
         },
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     write_snapshot(cache, &data, Utc::now()).unwrap();
 }

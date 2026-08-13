@@ -30,6 +30,7 @@ fn seed(cache: &Path) -> String {
                 osv: osv_counts,
             },
             sources: BTreeMap::new(),
+            skipped_ecosystems: Default::default(),
         },
         Utc.with_ymd_and_hms(2026, 8, 5, 0, 0, 0).unwrap(),
     )

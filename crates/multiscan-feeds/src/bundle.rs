@@ -190,6 +190,9 @@ pub fn import(
         rule_packs,
         counts: manifest.counts.clone(),
         sources: manifest.sources.clone(),
+        // Coverage gaps travel with the bundle: an air-gapped operator has no
+        // way to notice a missing ecosystem otherwise (ADR 0022 §8).
+        skipped_ecosystems: manifest.skipped_ecosystems.clone(),
     };
     let installed = write_snapshot(cache, &data, manifest.as_of)?;
     Ok(installed.manifest.snapshot_id)

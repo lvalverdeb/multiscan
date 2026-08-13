@@ -42,16 +42,20 @@ pub enum Scheme {
 
 impl Scheme {
     /// The OSV ecosystem string this scheme applies to. OS ecosystems are
-    /// release-qualified in OSV (`Debian:11`, `Ubuntu:22.04`, `Alpine:v3.20`,
-    /// `Red Hat`, `Rocky Linux:9`, …), so we match on a prefix.
+    /// release-qualified in OSV (`Debian:11`, `Ubuntu:22.04:LTS`,
+    /// `Alpine:v3.20`, `Red Hat:enterprise_linux:9::appstream`, …), so we
+    /// match on the part before the first colon.
     pub fn for_osv_ecosystem(ecosystem: &str) -> Scheme {
         let base = ecosystem.split(':').next().unwrap_or(ecosystem);
         match base {
             "crates.io" | "npm" | "Go" => Scheme::Semver,
             "PyPI" => Scheme::Pep440,
             "Debian" | "Ubuntu" => Scheme::Debian,
-            "Alpine" => Scheme::Apk,
-            "Red Hat" | "Rocky Linux" | "AlmaLinux" | "openSUSE" | "SUSE" | "Fedora" => Scheme::Rpm,
+            // Wolfi and Chainguard are apk-based, and version their packages
+            // the apk way (`1.2.3-r0`).
+            "Alpine" | "Wolfi" | "Chainguard" => Scheme::Apk,
+            "Red Hat" | "Rocky Linux" | "AlmaLinux" | "openSUSE" | "SUSE" | "Fedora"
+            | "Azure Linux" | "openEuler" | "Mageia" => Scheme::Rpm,
             "RubyGems" => Scheme::RubyGems,
             "Packagist" => Scheme::Composer,
             "Maven" => Scheme::Maven,

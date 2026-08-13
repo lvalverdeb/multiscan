@@ -103,6 +103,10 @@ baseline = ".multiscan/baseline.json"
 
 [feeds]
 max_age = "7d"
+# Replaces the default OSV mirror set. The default carries every lockfile
+# ecosystem plus 13 distro ecosystems (~4 GB of cache); narrow it to what you
+# actually scan. Base names only — each carries every release of its distro.
+# osv_ecosystems = ["npm", "PyPI", "Debian", "Alpine"]
 
 [[suppress]]
 # ≥1 selector required (finding_id, rule_id, path); when several are given they

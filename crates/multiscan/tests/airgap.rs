@@ -30,6 +30,7 @@ fn seed(cache: &Path) {
                 osv: counts,
             },
             sources: BTreeMap::new(),
+            skipped_ecosystems: Default::default(),
         },
         Utc::now(),
     )

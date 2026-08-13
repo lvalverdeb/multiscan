@@ -3,7 +3,31 @@
 
 use serde::Deserialize;
 
+use crate::distro::{self, DistroKey};
 use crate::version::Scheme;
+
+/// How a lookup names the ecosystem it wants advisories for.
+///
+/// Lockfile ecosystems are exact strings — `npm` is `npm`. OS package
+/// ecosystems are a normalized [`DistroKey`], because OSV and `os-release`
+/// spell the same release differently (ADR 0022 §5).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum EcoKey {
+    /// An ecosystem matched by exact string equality.
+    Exact(String),
+    /// A distro release matched on its normalized identity.
+    Distro(DistroKey),
+}
+
+impl EcoKey {
+    /// The key an OSV record's own `package.ecosystem` indexes under.
+    pub(crate) fn for_record(ecosystem: &str) -> Self {
+        match distro::from_osv_ecosystem(ecosystem) {
+            Some(key) => EcoKey::Distro(key),
+            None => EcoKey::Exact(ecosystem.to_string()),
+        }
+    }
+}
 
 /// One OSV advisory record (a line of `osv/<ecosystem>.jsonl`).
 #[derive(Debug, Clone, Deserialize)]
@@ -16,6 +40,14 @@ pub struct Advisory {
     /// Aliases (often the CVE id) — used for KEV/EPSS enrichment.
     #[serde(default)]
     pub aliases: Vec<String>,
+    /// Ids OSV records as connected to this one. Distro advisories put their
+    /// CVE here rather than in `aliases` (ADR 0023).
+    #[serde(default)]
+    pub related: Vec<String>,
+    /// Ids this advisory derives from — the upstream CVE for a distro
+    /// backport. The stronger of the two connections (ADR 0023).
+    #[serde(default)]
+    pub upstream: Vec<String>,
     /// Affected package/version records.
     #[serde(default)]
     pub affected: Vec<Affected>,
@@ -78,25 +110,51 @@ pub struct Match {
 }
 
 impl Advisory {
-    /// The canonical vulnerability id for identity and dedup (ADR 0012): the
-    /// smallest CVE alias when the advisory carries one, else the advisory's
-    /// own id. Records that share a CVE — typically a GHSA and a PYSEC — thus
-    /// share one identity and merge downstream into a single finding (max
-    /// severity, both records as sources), instead of duplicating.
+    /// The canonical vulnerability id for identity and dedup (ADR 0012, as
+    /// ratified by ADR 0023): the smallest CVE the advisory names, else the
+    /// advisory's own id. Records that share a CVE — a GHSA and a PYSEC, a DSA
+    /// and an openSUSE-SU — thus share one identity and merge downstream into
+    /// a single finding (max severity, both records as sources), instead of
+    /// duplicating.
+    ///
+    /// The three CVE-bearing fields are consulted in precedence order, not
+    /// unioned: `aliases` is OSV's equivalence claim, `upstream` names the CVE
+    /// a distro backport derives from, and `related` is only "connected to".
+    /// Taking the minimum across all three would let a loosely-related CVE
+    /// outrank the record's own alias — measured against the mirrored
+    /// ecosystems, that would re-key 26 records to a CVE that is not the one
+    /// they claim to be.
     pub fn canonical_vuln_id(&self) -> String {
-        self.cve_aliases()
-            .into_iter()
-            .min()
+        fn smallest_cve<'a>(ids: impl Iterator<Item = &'a String>) -> Option<String> {
+            ids.filter(|a| a.starts_with("CVE-")).min().cloned()
+        }
+        smallest_cve(self.aliases.iter())
+            .or_else(|| smallest_cve(self.upstream.iter()))
+            .or_else(|| smallest_cve(self.related.iter()))
             .unwrap_or_else(|| self.id.clone())
     }
 
-    /// The CVE alias, if any, for KEV/EPSS enrichment.
+    /// Every CVE this advisory names, for KEV/EPSS enrichment and evidence
+    /// detail — sorted and deduplicated (`DET-001`).
+    ///
+    /// Distro advisories overwhelmingly carry their CVE in `related` or
+    /// `upstream` rather than `aliases` (ADR 0023): of 695 sampled openSUSE
+    /// records, 674 name a CVE in `related` and none in `aliases`. Reading
+    /// only `aliases` would leave every OS package finding unenriched, so
+    /// factor X would fall back to its default (`RSK-002`) even for a
+    /// KEV-listed weakness.
     pub fn cve_aliases(&self) -> Vec<String> {
-        self.aliases
+        let mut cves: Vec<String> = self
+            .aliases
             .iter()
+            .chain(&self.related)
+            .chain(&self.upstream)
             .filter(|a| a.starts_with("CVE-"))
             .cloned()
-            .collect()
+            .collect();
+        cves.sort();
+        cves.dedup();
+        cves
     }
 
     /// CWE ids, if the advisory carries them.
@@ -116,13 +174,27 @@ impl Advisory {
 
     /// Does this advisory affect `name`@`version` in `ecosystem`? Returns the
     /// match (with computed `fixed_version`) or `None`.
+    ///
+    /// `ecosystem` is an OSV ecosystem string. For OS packages, prefer
+    /// [`Advisory::matches_key`]: an image reports `Ubuntu 22.04`, which is
+    /// spelled `Ubuntu:22.04:LTS` here, and only the normalized key knows they
+    /// are the same release.
     pub fn matches(&self, ecosystem: &str, name: &str, version: &str) -> Option<Match> {
-        let scheme = Scheme::for_osv_ecosystem(ecosystem);
+        self.matches_key(&EcoKey::for_record(ecosystem), name, version)
+    }
+
+    /// As [`Advisory::matches`], against a normalized ecosystem key.
+    pub(crate) fn matches_key(&self, key: &EcoKey, name: &str, version: &str) -> Option<Match> {
         for affected in &self.affected {
             let Some(package) = &affected.package else {
                 continue;
             };
-            if package.ecosystem != ecosystem || !name_matches(ecosystem, &package.name, name) {
+            // The scheme comes from the record's own ecosystem, which is the
+            // one whose ordering the version bounds were written in.
+            let scheme = Scheme::for_osv_ecosystem(&package.ecosystem);
+            if EcoKey::for_record(&package.ecosystem) != *key
+                || !name_matches(&package.ecosystem, &package.name, name)
+            {
                 continue;
             }
             // Explicit version list.
@@ -387,6 +459,120 @@ mod tests {
                 .fixed_version,
             None
         );
+    }
+
+    /// ADR 0022 §5: an image reports `ID=ubuntu VERSION_ID=22.04`, OSV writes
+    /// `Ubuntu:22.04:LTS`, and only the normalized key knows they are one
+    /// release. Before ADR 0022 this comparison was string equality and
+    /// matched nothing on Ubuntu or RHEL.
+    fn os_key(id: &str, version: Option<&str>) -> EcoKey {
+        EcoKey::Distro(crate::distro::from_os_release(id, version).expect("resolvable distro"))
+    }
+
+    #[test]
+    fn os_release_matches_the_osv_spelling_of_its_ecosystem() {
+        let ubuntu = advisory(
+            r#"{"id":"USN-1","affected":[{"package":{"ecosystem":"Ubuntu:22.04:LTS","name":"openssl"},
+            "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"3.0.2-0ubuntu1.15"}]}]}]}"#,
+        );
+        let m = ubuntu
+            .matches_key(
+                &os_key("ubuntu", Some("22.04")),
+                "openssl",
+                "3.0.2-0ubuntu1.10",
+            )
+            .expect("Ubuntu:22.04:LTS matches a 22.04 image");
+        assert_eq!(m.fixed_version.as_deref(), Some("3.0.2-0ubuntu1.15"));
+        // A different release must not match.
+        assert!(ubuntu
+            .matches_key(
+                &os_key("ubuntu", Some("24.04")),
+                "openssl",
+                "3.0.2-0ubuntu1.10"
+            )
+            .is_none());
+
+        let rhel = advisory(
+            r#"{"id":"RHSA-1","affected":[{"package":{"ecosystem":"Red Hat:enterprise_linux:9::appstream","name":"openssl"},
+            "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1:3.0.7-25.el9_3"}]}]}]}"#,
+        );
+        assert!(rhel
+            .matches_key(&os_key("rhel", Some("9.3")), "openssl", "1:3.0.7-24.el9")
+            .is_some());
+        assert!(rhel
+            .matches_key(&os_key("rhel", Some("8.9")), "openssl", "1:3.0.7-24.el9")
+            .is_none());
+    }
+
+    #[test]
+    fn ubuntu_pro_advisory_does_not_match_a_plain_release() {
+        // Its fix ships only to Pro subscribers; reporting it against a plain
+        // 22.04 image would advertise a version the user cannot install
+        // (ADR 0022 §6).
+        let pro = advisory(
+            r#"{"id":"USN-2","affected":[{"package":{"ecosystem":"Ubuntu:Pro:22.04:LTS","name":"libtiff"},
+            "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"4.3.0-6ubuntu0.9"}]}]}]}"#,
+        );
+        assert!(pro
+            .matches_key(
+                &os_key("ubuntu", Some("22.04")),
+                "libtiff",
+                "4.3.0-6ubuntu0.1"
+            )
+            .is_none());
+    }
+
+    /// ADR 0023 precedence: `aliases` is an equivalence claim and outranks the
+    /// looser `related`. Unioning the fields and taking the minimum would
+    /// re-key this record to a CVE it never claimed to be.
+    #[test]
+    fn an_alias_cve_outranks_a_smaller_related_cve() {
+        let adv = advisory(
+            r#"{"id":"GHSA-q","aliases":["CVE-2024-9999"],"related":["CVE-2024-1111"],
+            "affected":[{"package":{"ecosystem":"npm","name":"left-pad"},"versions":["1.0.0"]}]}"#,
+        );
+        assert_eq!(adv.canonical_vuln_id(), "CVE-2024-9999");
+        // Enrichment still sees both — that is a lookup, not an identity.
+        assert_eq!(
+            adv.cve_aliases(),
+            vec!["CVE-2024-1111".to_string(), "CVE-2024-9999".to_string()]
+        );
+    }
+
+    #[test]
+    fn distro_advisory_cve_comes_from_related_and_upstream() {
+        // ADR 0023: distro records put the CVE here, not in `aliases`.
+        let adv = advisory(
+            r#"{"id":"openSUSE-SU-2024:14017-1","related":["CVE-2024-3094"],"upstream":["CVE-2024-3094"],
+            "affected":[{"package":{"ecosystem":"openSUSE:Tumbleweed","name":"xz"},
+            "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"5.6.2-1.1"}]}]}]}"#,
+        );
+        assert_eq!(adv.cve_aliases(), vec!["CVE-2024-3094".to_string()]);
+        // ADR 0023, ratified: identity keys on the CVE, so this record merges
+        // with any other distro's advisory for the same weakness.
+        assert_eq!(adv.canonical_vuln_id(), "CVE-2024-3094");
+
+        // Tumbleweed is rolling: its os-release datestamp is not a release.
+        let m = adv
+            .matches_key(
+                &os_key("opensuse-tumbleweed", Some("20240328")),
+                "xz",
+                "5.6.1-1.1",
+            )
+            .expect("the backdoored version is affected");
+        assert_eq!(m.fixed_version.as_deref(), Some("5.6.2-1.1"));
+        // The fixed rebuild is not.
+        assert!(adv
+            .matches_key(
+                &os_key("opensuse-tumbleweed", Some("20240501")),
+                "xz",
+                "5.6.2-1.1"
+            )
+            .is_none());
+        // Leap is a different distro entirely.
+        assert!(adv
+            .matches_key(&os_key("opensuse-leap", Some("15.6")), "xz", "5.6.1-1.1")
+            .is_none());
     }
 
     #[test]

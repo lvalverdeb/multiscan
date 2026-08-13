@@ -53,8 +53,11 @@ impl Default for FeedSources {
                     .to_string(),
             epss_url: "https://epss.cyentia.com/epss_scores-current.csv.gz".to_string(),
             osv_base_url: "https://osv-vulnerabilities.storage.googleapis.com".to_string(),
-            // The spec 7.1 lockfile ecosystems (OS package ecosystems join in
-            // phase 4 with image scanning).
+            // The spec 7.1 lockfile ecosystems, then the distro ecosystems the
+            // OS package path resolves against (ADR 0022 §1). Base names only:
+            // each bucket already carries every release of its distro, and a
+            // release-qualified name (`Ubuntu:22.04:LTS`) is not a legal
+            // filename on every NFR-007 platform.
             osv_ecosystems: [
                 "crates.io",
                 "npm",
@@ -64,6 +67,19 @@ impl Default for FeedSources {
                 "RubyGems",
                 "Packagist",
                 "NuGet",
+                "Debian",
+                "Ubuntu",
+                "Alpine",
+                "Red Hat",
+                "Rocky Linux",
+                "AlmaLinux",
+                "openSUSE",
+                "SUSE",
+                "Chainguard",
+                "Wolfi",
+                "Azure Linux",
+                "openEuler",
+                "Mageia",
             ]
             .into_iter()
             .map(String::from)
@@ -97,13 +113,34 @@ pub fn update(
 
     let mut osv_jsonl: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut osv_counts: BTreeMap<String, u64> = BTreeMap::new();
+    let mut skipped: BTreeMap<String, String> = BTreeMap::new();
     for ecosystem in &sources.osv_ecosystems {
-        let url = format!("{}/{}/all.zip", sources.osv_base_url, ecosystem);
+        let url = osv_url(&sources.osv_base_url, ecosystem);
         eprintln!("multiscan db update: fetching OSV {ecosystem}...");
-        let zip_bytes = client.fetch(&url)?;
-        let (jsonl, count) = zip_to_jsonl(&zip_bytes, ecosystem)?;
-        osv_jsonl.insert(ecosystem.clone(), jsonl);
-        osv_counts.insert(ecosystem.clone(), count);
+        // ADR 0022 §8: one unreachable or malformed bucket must not cost the
+        // operator the other twenty. It is recorded in the manifest and
+        // printed by `db status`, so a snapshot that is missing an ecosystem
+        // never reads like one that found nothing in it.
+        let result = client
+            .fetch(&url)
+            .and_then(|zip_bytes| zip_to_jsonl(&zip_bytes, ecosystem));
+        match result {
+            Ok((jsonl, count)) => {
+                osv_jsonl.insert(ecosystem.clone(), jsonl);
+                osv_counts.insert(ecosystem.clone(), count);
+            }
+            Err(err) => {
+                eprintln!("multiscan db update: warning: OSV {ecosystem} skipped: {err}");
+                skipped.insert(ecosystem.clone(), err.to_string());
+            }
+        }
+    }
+    if osv_jsonl.is_empty() && !sources.osv_ecosystems.is_empty() {
+        // Every ecosystem failing is not a degradation, it is an outage: a
+        // snapshot with no advisory data at all would silently pass scans.
+        return Err(FeedError::Corrupt(
+            "no OSV ecosystem could be fetched".to_string(),
+        ));
     }
 
     // Optional secrets rule pack (ADR 0010). Fetched through the same
@@ -131,10 +168,10 @@ pub fn update(
     if let Some(sast_url) = &sources.sast_rules_url {
         source_map.insert("rules/sast".to_string(), sast_url.clone());
     }
-    for ecosystem in &sources.osv_ecosystems {
+    for ecosystem in osv_jsonl.keys() {
         source_map.insert(
             format!("osv/{ecosystem}"),
-            format!("{}/{}/all.zip", sources.osv_base_url, ecosystem),
+            osv_url(&sources.osv_base_url, ecosystem),
         );
     }
 
@@ -151,6 +188,7 @@ pub fn update(
                 osv: osv_counts,
             },
             sources: source_map,
+            skipped_ecosystems: skipped.clone(),
         },
         now,
     )?;
@@ -158,7 +196,31 @@ pub fn update(
         "multiscan db update: snapshot {} written ({} KEV, {} EPSS)",
         snapshot.manifest.snapshot_id, kev_count, epss_count
     );
+    if !skipped.is_empty() {
+        eprintln!(
+            "multiscan db update: {} ecosystem(s) skipped: {}",
+            skipped.len(),
+            skipped.keys().cloned().collect::<Vec<_>>().join(", ")
+        );
+    }
     Ok(snapshot)
+}
+
+/// The `all.zip` URL for one ecosystem. Ecosystem names are not URL-safe —
+/// `Red Hat`, `Rocky Linux`, and `Azure Linux` all contain a space — so the
+/// path segment is percent-encoded before it reaches the client, which parses
+/// the string as a URI and would reject a raw space.
+fn osv_url(base: &str, ecosystem: &str) -> String {
+    let mut encoded = String::with_capacity(ecosystem.len());
+    for byte in ecosystem.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    format!("{base}/{encoded}/all.zip")
 }
 
 fn gunzip(bytes: &[u8]) -> Result<Vec<u8>, FeedError> {

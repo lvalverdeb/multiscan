@@ -152,6 +152,7 @@ fn tampered_snapshot_file_is_detected() {
             rule_packs: std::collections::BTreeMap::new(),
             counts: SnapshotCounts::default(),
             sources: BTreeMap::new(),
+            skipped_ecosystems: Default::default(),
         },
         now,
     )
@@ -186,10 +187,109 @@ fn identical_content_same_day_converges_on_one_snapshot_id() {
         rule_packs: std::collections::BTreeMap::new(),
         counts: SnapshotCounts::default(),
         sources: BTreeMap::new(),
+        skipped_ecosystems: Default::default(),
     };
     let first = write_snapshot(cache.path(), &data(), now).unwrap();
     let second = write_snapshot(cache.path(), &data(), now).unwrap();
     assert_eq!(first.manifest.snapshot_id, second.manifest.snapshot_id);
+}
+
+/// ADR 0022 §8: one unreachable bucket costs that bucket, not the update. The
+/// gap is recorded in the manifest so `db status` can report it — a snapshot
+/// silently missing an ecosystem reads exactly like one that found nothing.
+#[test]
+fn one_unreachable_ecosystem_degrades_the_snapshot_not_the_update() {
+    let mut routes = BTreeMap::new();
+    routes.insert("/kev.json".to_string(), KEV_FIXTURE.as_bytes().to_vec());
+    routes.insert("/epss.csv.gz".to_string(), gzip(EPSS_FIXTURE.as_bytes()));
+    routes.insert("/npm/all.zip".to_string(), osv_zip());
+    // `Rocky%20Linux/all.zip` is deliberately absent: the server 404s it.
+    let (base, handle) = serve(routes);
+
+    let cache = tempfile::tempdir().unwrap();
+    let client = FeedClient::with_allowlist(["127.0.0.1".to_string()]);
+    let sources = FeedSources {
+        kev_url: format!("{base}/kev.json"),
+        epss_url: format!("{base}/epss.csv.gz"),
+        osv_base_url: base.clone(),
+        osv_ecosystems: vec!["npm".to_string(), "Rocky Linux".to_string()],
+        rules_url: None,
+        sast_rules_url: None,
+    };
+    let now = chrono::Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
+
+    update(&client, &sources, cache.path(), now).unwrap();
+    stop(&base, handle);
+
+    let snapshot = current_snapshot(cache.path()).unwrap().expect("pinned");
+    assert_eq!(snapshot.manifest.counts.osv["npm"], 2);
+    let skipped = &snapshot.manifest.skipped_ecosystems;
+    assert!(
+        skipped.contains_key("Rocky Linux"),
+        "the missing ecosystem must be recorded, got {skipped:?}"
+    );
+    assert!(!snapshot
+        .manifest
+        .files
+        .contains_key("osv/Rocky Linux.jsonl"));
+}
+
+/// The ecosystem name is a URL path segment, and three of the distro buckets
+/// contain a space (`Red Hat`, `Rocky Linux`, `Azure Linux`). An unencoded
+/// space does not survive URI parsing, so the fetch would never reach the
+/// server at all.
+#[test]
+fn ecosystem_names_with_spaces_are_percent_encoded() {
+    let mut routes = BTreeMap::new();
+    routes.insert("/kev.json".to_string(), KEV_FIXTURE.as_bytes().to_vec());
+    routes.insert("/epss.csv.gz".to_string(), gzip(EPSS_FIXTURE.as_bytes()));
+    routes.insert("/Rocky%20Linux/all.zip".to_string(), osv_zip());
+    let (base, handle) = serve(routes);
+
+    let cache = tempfile::tempdir().unwrap();
+    let client = FeedClient::with_allowlist(["127.0.0.1".to_string()]);
+    let sources = FeedSources {
+        kev_url: format!("{base}/kev.json"),
+        epss_url: format!("{base}/epss.csv.gz"),
+        osv_base_url: base.clone(),
+        osv_ecosystems: vec!["Rocky Linux".to_string()],
+        rules_url: None,
+        sast_rules_url: None,
+    };
+    let now = chrono::Utc.with_ymd_and_hms(2026, 8, 5, 12, 0, 0).unwrap();
+
+    update(&client, &sources, cache.path(), now).unwrap();
+    stop(&base, handle);
+
+    let snapshot = current_snapshot(cache.path()).unwrap().expect("pinned");
+    assert_eq!(snapshot.manifest.counts.osv["Rocky Linux"], 2);
+    assert!(snapshot.manifest.skipped_ecosystems.is_empty());
+    // Stored under the decoded name, which is what the index keys on.
+    assert!(snapshot.read_file("osv/Rocky Linux.jsonl").is_ok());
+}
+
+/// ADR 0022 §2: `osv/Ubuntu:22.04:LTS.jsonl` is not a legal filename on
+/// Windows, and NFR-007 requires a snapshot to be extractable everywhere.
+#[test]
+fn release_qualified_ecosystem_names_are_rejected() {
+    let cache = tempfile::tempdir().unwrap();
+    let now = chrono::Utc.with_ymd_and_hms(2026, 8, 5, 0, 0, 0).unwrap();
+    let mut osv = BTreeMap::new();
+    osv.insert("Ubuntu:22.04:LTS".to_string(), b"{}\n".to_vec());
+    let err = write_snapshot(
+        cache.path(),
+        &SnapshotData {
+            kev_json: KEV_FIXTURE.as_bytes().to_vec(),
+            epss_csv: EPSS_FIXTURE.as_bytes().to_vec(),
+            osv_jsonl: osv,
+            rule_packs: std::collections::BTreeMap::new(),
+            counts: SnapshotCounts::default(),
+            sources: BTreeMap::new(),
+            skipped_ecosystems: Default::default(),
+        },
+        now,
+    );
+    assert!(err.is_err(), "a colon in an ecosystem name must be refused");
 }
 
 /// ADR 0010: with a rules_url configured, `update` fetches the secrets rule

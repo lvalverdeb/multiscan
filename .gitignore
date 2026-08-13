@@ -3,6 +3,7 @@
 target/
 .multiscan/
 .idea/
+.claude/
 *.iml
 .DS_Store
 
@@ -11,3 +12,4 @@ target/
 # here — see the fuzz targets' oracles.
 fuzz/corpus/
 fuzz/artifacts/
+CLAUDE.md
