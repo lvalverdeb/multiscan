@@ -5,34 +5,18 @@
     "Criticality": {
       "description": "Asset criticality context for risk scoring (spec 8, factor A).",
       "type": "string",
-      "enum": [
-        "low",
-        "medium",
-        "high",
-        "critical"
-      ]
+      "enum": ["low", "medium", "high", "critical"]
     },
     "DataClassification": {
       "description": "Data classification context; sensitive/regulated adds +0.10 to factor A, clamped at 1.30 (spec 8).",
       "type": "string",
-      "enum": [
-        "public",
-        "internal",
-        "sensitive",
-        "regulated"
-      ]
+      "enum": ["public", "internal", "sensitive", "regulated"]
     },
     "FailOn": {
       "description": "Gate threshold: a risk score number or a severity name (spec 4.2).",
       "oneOf": [
-        {
-          "description": "Minimum risk score that fails the gate.",
-          "type": "number"
-        },
-        {
-          "description": "Minimum severity that fails the gate.",
-          "$ref": "#/definitions/Severity"
-        }
+        { "description": "Minimum risk score that fails the gate.", "type": "number" },
+        { "description": "Minimum severity that fails the gate.", "$ref": "#/definitions/Severity" }
       ]
     },
     "LayerScanConfig": {
@@ -40,13 +24,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "exclude": {
-          "description": "Additional glob patterns excluded for this layer only. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
+        "exclude": { "description": "Additional glob patterns excluded for this layer only. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it.", "type": "array", "items": { "type": "string" } }
       }
     },
     "SecretsScanConfig": {
@@ -54,24 +32,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "exclude": {
-          "description": "Additional glob patterns excluded for the secrets layer only. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "entropy_exclude": {
-          "description": "Globs where the high-entropy fallback is silenced; precise provider rules still run there. Extends the built-in known-noise list (lockfiles, IDE metadata, minified assets \u2014 ADR 0005).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "history": {
-          "description": "Also scan git-history blobs (ADR 0006): committed-then-removed secrets are still live. Opt-in; requires the git CLI; bounded by hard blob/size caps; degrades to Partial when the root is not a git repository.",
-          "type": "boolean"
-        }
+        "exclude": { "description": "Additional glob patterns excluded for the secrets layer only. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it.", "type": "array", "items": { "type": "string" } },
+        "entropy_exclude": { "description": "Globs where the high-entropy fallback is silenced; precise provider rules still run there. Extends the built-in known-noise list (lockfiles, IDE metadata, minified assets — ADR 0005).", "type": "array", "items": { "type": "string" } },
+        "history": { "description": "Also scan git-history blobs (ADR 0006): committed-then-removed secrets are still live. Opt-in; requires the git CLI; bounded by hard blob/size caps; degrades to Partial when the root is not a git repository.", "type": "boolean" }
       }
     },
     "ScanConfig": {
@@ -79,40 +42,13 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "layers": {
-          "description": "Layers to run; default auto-detect.",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/Layer"
-          }
-        },
-        "profile": {
-          "description": "Scan profile; default standard.",
-          "$ref": "#/definitions/Profile"
-        },
-        "exclude": {
-          "description": "Glob patterns to exclude, all layers. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it. Committable, machine-independent (CLI-007).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "respect_gitignore": {
-          "description": "Also honor the repository's .gitignore during discovery (ADR 0009). Off by default: a secrets scan must not skip a gitignored file (e.g. .env) unless the user opts in. `.multiscanignore` is always honored regardless.",
-          "type": "boolean"
-        },
-        "sca": {
-          "description": "SCA-layer overrides ([scan.sca]).",
-          "$ref": "#/definitions/LayerScanConfig"
-        },
-        "secrets": {
-          "description": "Secrets-layer overrides ([scan.secrets]).",
-          "$ref": "#/definitions/SecretsScanConfig"
-        },
-        "iac": {
-          "description": "IaC-layer overrides ([scan.iac]).",
-          "$ref": "#/definitions/LayerScanConfig"
-        }
+        "layers": { "description": "Layers to run; default auto-detect.", "type": "array", "items": { "$ref": "#/definitions/Layer" } },
+        "profile": { "description": "Scan profile; default standard.", "$ref": "#/definitions/Profile" },
+        "exclude": { "description": "Glob patterns to exclude, all layers. Matched against the root-relative POSIX path; a pattern matching a directory path prunes the walk beneath it. Committable, machine-independent (CLI-007).", "type": "array", "items": { "type": "string" } },
+        "respect_gitignore": { "description": "Also honor the repository's .gitignore during discovery (ADR 0009). Off by default: a secrets scan must not skip a gitignored file (e.g. .env) unless the user opts in. `.multiscanignore` is always honored regardless.", "type": "boolean" },
+        "sca": { "description": "SCA-layer overrides ([scan.sca]).", "$ref": "#/definitions/LayerScanConfig" },
+        "secrets": { "description": "Secrets-layer overrides ([scan.secrets]).", "$ref": "#/definitions/SecretsScanConfig" },
+        "iac": { "description": "IaC-layer overrides ([scan.iac]).", "$ref": "#/definitions/LayerScanConfig" }
       }
     },
     "GateConfig": {
@@ -120,18 +56,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "fail_on": {
-          "description": "Exit 1 if any Finding meets this threshold.",
-          "$ref": "#/definitions/FailOn"
-        },
-        "baseline": {
-          "description": "Relative path to a baseline Finding set for delta gating.",
-          "type": "string"
-        },
-        "ignore_unfixable": {
-          "description": "Gate only on Findings with a fix available.",
-          "type": "boolean"
-        }
+        "fail_on": { "description": "Exit 1 if any Finding meets this threshold.", "$ref": "#/definitions/FailOn" },
+        "baseline": { "description": "Relative path to a baseline Finding set for delta gating.", "type": "string" },
+        "ignore_unfixable": { "description": "Gate only on Findings with a fix available.", "type": "boolean" }
       }
     },
     "RiskConfig": {
@@ -139,14 +66,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "asset_criticality": {
-          "description": "Factor A input.",
-          "$ref": "#/definitions/Criticality"
-        },
-        "data_classification": {
-          "description": "Factor A modifier input.",
-          "$ref": "#/definitions/DataClassification"
-        }
+        "asset_criticality": { "description": "Factor A input.", "$ref": "#/definitions/Criticality" },
+        "data_classification": { "description": "Factor A modifier input.", "$ref": "#/definitions/DataClassification" }
       }
     },
     "FeedsConfig": {
@@ -154,21 +75,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "max_age": {
-          "description": "Maximum acceptable feed age, e.g. 7d (FD-004).",
-          "type": "string"
-        },
-        "offline": {
-          "description": "Never touch the network (FR-011).",
-          "type": "boolean"
-        },
-        "osv_ecosystems": {
-          "description": "OSV ecosystems to mirror on `db update`, replacing the default set (ADR 0022). Base ecosystem names only, e.g. \"npm\", \"Debian\", \"Red Hat\"; a name containing `:` is rejected, since it is not a portable filename (NFR-007).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
+        "max_age": { "description": "Maximum acceptable feed age, e.g. 7d (FD-004).", "type": "string" },
+        "offline": { "description": "Never touch the network (FR-011).", "type": "boolean" },
+        "osv_ecosystems": { "description": "OSV ecosystems to mirror on `db update`, replacing the default set (ADR 0022). Base ecosystem names only, e.g. \"npm\", \"Debian\", \"Red Hat\"; a name containing `:` is rejected, since it is not a portable filename (NFR-007).", "type": "array", "items": { "type": "string" } }
       }
     },
     "RulesConfig": {
@@ -176,92 +85,37 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "sca_db": {
-          "description": "Pinned advisory snapshot, e.g. osv@2026-08-05.",
-          "type": "string"
-        },
-        "iac_pack": {
-          "description": "Pinned IaC policy pack, e.g. cis-bundle@1.9.0.",
-          "type": "string"
-        },
-        "secrets_pack": {
-          "description": "Pinned secrets rule pack.",
-          "type": "string"
-        },
-        "sast_pack": {
-          "description": "Pinned SAST rule pack (MS-PAT-1), e.g. community-py-js@1.0.0.",
-          "type": "string"
-        }
+        "sca_db": { "description": "Pinned advisory snapshot, e.g. osv@2026-08-05.", "type": "string" },
+        "iac_pack": { "description": "Pinned IaC policy pack, e.g. cis-bundle@1.9.0.", "type": "string" },
+        "secrets_pack": { "description": "Pinned secrets rule pack.", "type": "string" },
+        "sast_pack": { "description": "Pinned SAST rule pack (MS-PAT-1), e.g. community-py-js@1.0.0.", "type": "string" }
       }
     },
     "SuppressEntry": {
-      "description": "One [[suppress]] entry. justification, approver, and expires are all mandatory \u2014 permanent suppression does not exist (CLI-006). At least one selector (finding_id, rule_id, or path) must be present; when several are, they must all match (ADR 0008).",
+      "description": "One [[suppress]] entry. justification, approver, and expires are all mandatory — permanent suppression does not exist (CLI-006). At least one selector (finding_id, rule_id, or path) must be present; when several are, they must all match (ADR 0008).",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "justification",
-        "approver",
-        "expires"
-      ],
+      "required": ["justification", "approver", "expires"],
       "properties": {
-        "finding_id": {
-          "description": "Exact Finding to suppress (full id). Selector.",
-          "$ref": "#/definitions/FindingId"
-        },
-        "rule_id": {
-          "description": "Suppress Findings whose engine rule/policy/template id equals this (e.g. `high-entropy-string`). Selector; combine with `path` to scope it (ADR 0008).",
-          "type": "string"
-        },
-        "path": {
-          "description": "Glob over the Finding's root-relative POSIX location path (e.g. `uv.lock`, `vendor/**`). Selector (ADR 0008).",
-          "type": "string"
-        },
-        "justification": {
-          "description": "Why this Finding is suppressed.",
-          "type": "string"
-        },
-        "approver": {
-          "description": "Who approved the suppression.",
-          "type": "string"
-        },
-        "expires": {
-          "description": "Expiry date, RFC 3339 date; after this the Finding gates normally (FR-014).",
-          "type": "string"
-        }
+        "finding_id": { "description": "Exact Finding to suppress (full id). Selector.", "$ref": "#/definitions/FindingId" },
+        "rule_id": { "description": "Suppress Findings whose engine rule/policy/template id equals this (e.g. `high-entropy-string`). Selector; combine with `path` to scope it (ADR 0008).", "type": "string" },
+        "path": { "description": "Glob over the Finding's root-relative POSIX location path (e.g. `uv.lock`, `vendor/**`). Selector (ADR 0008).", "type": "string" },
+        "justification": { "description": "Why this Finding is suppressed.", "type": "string" },
+        "approver": { "description": "Who approved the suppression.", "type": "string" },
+        "expires": { "description": "Expiry date, RFC 3339 date; after this the Finding gates normally (FR-014).", "type": "string" }
       }
     },
     "Config": {
-      "description": "multiscan.toml \u2014 committable, diff-friendly, no machine-specific values (CLI-007). Flags override file values; file values override defaults.",
+      "description": "multiscan.toml — committable, diff-friendly, no machine-specific values (CLI-007). Flags override file values; file values override defaults.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "scan": {
-          "description": "Scan selection and exclusions.",
-          "$ref": "#/definitions/ScanConfig"
-        },
-        "gate": {
-          "description": "CI gate policy.",
-          "$ref": "#/definitions/GateConfig"
-        },
-        "risk": {
-          "description": "Risk scoring context.",
-          "$ref": "#/definitions/RiskConfig"
-        },
-        "feeds": {
-          "description": "Feed freshness and offline policy.",
-          "$ref": "#/definitions/FeedsConfig"
-        },
-        "rules": {
-          "description": "Pinned rule and data sources.",
-          "$ref": "#/definitions/RulesConfig"
-        },
-        "suppress": {
-          "description": "Time-bounded, justified suppressions (CLI-006).",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/SuppressEntry"
-          }
-        }
+        "scan": { "description": "Scan selection and exclusions.", "$ref": "#/definitions/ScanConfig" },
+        "gate": { "description": "CI gate policy.", "$ref": "#/definitions/GateConfig" },
+        "risk": { "description": "Risk scoring context.", "$ref": "#/definitions/RiskConfig" },
+        "feeds": { "description": "Feed freshness and offline policy.", "$ref": "#/definitions/FeedsConfig" },
+        "rules": { "description": "Pinned rule and data sources.", "$ref": "#/definitions/RulesConfig" },
+        "suppress": { "description": "Time-bounded, justified suppressions (CLI-006).", "type": "array", "items": { "$ref": "#/definitions/SuppressEntry" } }
       }
     }
   }
