@@ -68,6 +68,12 @@ fn seed(cache: &Path) {
 
 /// A single-layer image whose rootfs has an os-release and a dpkg status with a
 /// vulnerable openssl.
+///
+/// The layer is shaped like a real Debian one, not like a minimal fixture: it
+/// carries `etc/alternatives` symlinks with **absolute** targets, and reaches
+/// `os-release` through a relative symlink. Stock `debian:12` ships 49 of the
+/// former, and a fixture without them passed while no real image could be
+/// scanned at all (ADR 0024).
 fn image_layer() -> Vec<u8> {
     let dpkg = "Package: bash\nStatus: install ok installed\nVersion: 5.1-2+deb11u1\nArchitecture: amd64\n\nPackage: openssl\nStatus: install ok installed\nVersion: 1.1.1n-0+deb11u1\nArchitecture: amd64\n";
     let os_release =
@@ -76,7 +82,7 @@ fn image_layer() -> Vec<u8> {
     {
         let mut b = tar::Builder::new(&mut tar);
         for (name, content) in [
-            ("etc/os-release", os_release.as_bytes()),
+            ("usr/lib/os-release", os_release.as_bytes()),
             ("var/lib/dpkg/status", dpkg.as_bytes()),
         ] {
             let mut h = tar::Header::new_gnu();
@@ -85,6 +91,20 @@ fn image_layer() -> Vec<u8> {
             h.set_mode(0o644);
             h.set_cksum();
             b.append_data(&mut h, name, content).unwrap();
+        }
+        for (name, target) in [
+            // Debian's alternatives system — absolute targets, skipped.
+            ("etc/alternatives/awk", "/usr/bin/mawk"),
+            ("etc/alternatives/pager", "/bin/more"),
+            // Relative, resolves inside the root — created and read through.
+            ("etc/os-release", "../usr/lib/os-release"),
+            ("bin", "usr/bin"),
+        ] {
+            let mut h = tar::Header::new_gnu();
+            h.set_size(0);
+            h.set_entry_type(tar::EntryType::Symlink);
+            h.set_mode(0o777);
+            b.append_link(&mut h, name, target).unwrap();
         }
         b.finish().unwrap();
     }
@@ -206,6 +226,13 @@ fn scan_image_finds_vulnerable_os_package() {
     );
     assert_eq!(f["severity"], "high");
     assert_eq!(f["remediation"]["fixed_version"], "1.1.1n-0+deb11u3");
+    // ADR 0024: the skipped alternatives links are reported on stderr, and the
+    // scan is Complete — exit 0 above, not the 3 that `Partial` would produce.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("2 symlink(s) with absolute targets skipped"),
+        "skipped links must be reported, got: {stderr}"
+    );
 }
 
 /// ADR 0022/0023 at the CLI boundary, on the shape the lockfile ecosystems

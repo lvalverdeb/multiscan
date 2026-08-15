@@ -31,6 +31,15 @@
 
 ### Fixed
 
+- **Debian-family images can be scanned at all.** Layer extraction treated any
+  symlink with an absolute target as a hostile escape and aborted the whole
+  extraction with exit 3. Stock `debian:12` ships 49 of them — the
+  `/etc/alternatives` system — so `scan image` died on the first one, for every
+  mainstream base image. Absolute targets are now skipped and counted (reported
+  on stderr, not silent); a *relative* target climbing above the root, which is
+  the actual escape shape and appears in no real layer, remains a hard error
+  (ADR 0024). Scanning `debian:12` now completes: 88 packages, 49 links
+  skipped, 24 findings, exit 0.
 - **OS package findings work at all.** `db update` mirrored only the eight
   lockfile ecosystems, so `multiscan scan image` resolved every installed
   package against an advisory set that contained no distro data: package counts

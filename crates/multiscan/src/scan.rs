@@ -708,11 +708,14 @@ fn scan_image(reference: &str, args: &ScanArgs) -> Result<Exit> {
             return Ok(Exit::ScanError);
         }
     };
-    if let Err(e) = extract_image(&image.layers, temp.path()) {
-        // A hostile layer (path escape, cap exceeded) is a scan error.
-        eprintln!("multiscan: error: extracting image layers: {e}");
-        return Ok(Exit::ScanError);
-    }
+    let extraction = match extract_image(&image.layers, temp.path()) {
+        Ok(stats) => stats,
+        Err(e) => {
+            // A hostile layer (path escape, cap exceeded) is a scan error.
+            eprintln!("multiscan: error: extracting image layers: {e}");
+            return Ok(Exit::ScanError);
+        }
+    };
 
     // OS-package resolution needs the pinned OSV snapshot.
     let feed_cache = multiscan_feeds::current_snapshot(&multiscan_feeds::cache_dir())
@@ -740,6 +743,16 @@ fn scan_image(reference: &str, args: &ScanArgs) -> Result<Exit> {
             "multiscan: {reference} ({}): {os}, {} package(s)",
             image.manifest_digest, scan.package_count
         );
+        // ADR 0024: reported, never silent — but not a degradation. The
+        // package databases are regular files, so a dropped `/etc/alternatives`
+        // link costs the inventory nothing, and calling it Partial would exit 3
+        // on every Debian-family image.
+        if extraction.skipped_absolute_links > 0 {
+            eprintln!(
+                "multiscan: {} symlink(s) with absolute targets skipped during extraction",
+                extraction.skipped_absolute_links
+            );
+        }
         if let Some(reason) = &scan.partial {
             eprintln!("multiscan: warning: {reason}");
         }

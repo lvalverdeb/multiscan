@@ -9,6 +9,14 @@
 //! attacker-planted symlink (entry 1: `x -> /etc`, entry 2: `x/passwd`) is
 //! rejected by the OS, not by our own path math. Lexical checks below are
 //! defense-in-depth on top of that.
+//!
+//! Symlink targets fall into three classes and only one is hostile (ADR 0024).
+//! A **contained** target is created. An **absolute** target is skipped and
+//! counted: `/etc/alternatives/awk -> /usr/bin/mawk` is how every
+//! Debian-family image ships — 49 of them in stock `debian:12` — and it can
+//! neither be honoured inside an extraction root nor followed out of one. A
+//! **relative target climbing above the root** stays a hard error: that is the
+//! RUSTSEC-2026-0148 shape, and no legitimate layer contains one.
 
 use std::io::Read;
 
@@ -47,6 +55,10 @@ pub struct Stats {
     pub symlinks: u64,
     /// Entries skipped (special files, unsafe entries, whiteouts applied).
     pub skipped: u64,
+    /// Symlinks skipped because their target is absolute (ADR 0024). Counted
+    /// separately from `skipped` because these are ordinary image content —
+    /// stock `debian:12` ships 49 of them — not anomalies.
+    pub skipped_absolute_links: u64,
     /// Total bytes written.
     pub bytes: u64,
 }
@@ -102,11 +114,23 @@ fn safe_components(path: &std::path::Path) -> Result<Vec<String>, ExtractError> 
     Ok(out)
 }
 
-/// Reject symlink/hardlink targets that are absolute or escape the root when
-/// resolved relative to the link's parent directory. (cap-std also blocks the
-/// escape at traversal time; this keeps dangling escape-pointing links out of
-/// the extracted tree entirely.)
-fn link_target_ok(parent_components: &[String], target: &std::path::Path) -> bool {
+/// What a symlink target is, relative to the extraction root (ADR 0024).
+#[derive(Debug, PartialEq, Eq)]
+enum LinkTarget {
+    /// Resolves inside the root. Safe to create.
+    Contained,
+    /// Absolute (`/usr/bin/mawk`). Ordinary image content, but meaningless
+    /// inside an extraction root — skipped, never created.
+    Absolute,
+    /// Relative, and climbs above the root (`../../../etc/passwd`). The
+    /// hostile shape; a hard error, so the caller learns the image was hostile.
+    Escapes,
+}
+
+/// Classify a symlink target resolved relative to the link's parent directory.
+/// (cap-std also blocks traversal out of the root at file-operation time; this
+/// keeps escape-pointing links out of the extracted tree entirely.)
+fn classify_link_target(parent_components: &[String], target: &std::path::Path) -> LinkTarget {
     use std::path::Component;
     let mut depth = parent_components.len() as isize;
     for comp in target.components() {
@@ -116,13 +140,13 @@ fn link_target_ok(parent_components: &[String], target: &std::path::Path) -> boo
             Component::ParentDir => {
                 depth -= 1;
                 if depth < 0 {
-                    return false; // escaped above root
+                    return LinkTarget::Escapes;
                 }
             }
-            Component::RootDir | Component::Prefix(_) => return false, // absolute
+            Component::RootDir | Component::Prefix(_) => return LinkTarget::Absolute,
         }
     }
-    true
+    LinkTarget::Contained
 }
 
 /// Create all parent directories for `components` (all but the last) inside
@@ -184,11 +208,22 @@ pub fn extract_layer<R: Read>(
                 .map_err(io)?
                 .ok_or_else(|| ExtractError::Unsafe("symlink without target".to_string()))?
                 .into_owned();
-            if !link_target_ok(&components[..components.len() - 1], &target) {
-                return Err(ExtractError::Unsafe(format!(
-                    "symlink `{}` escapes root",
-                    path.display()
-                )));
+            match classify_link_target(&components[..components.len() - 1], &target) {
+                LinkTarget::Contained => {}
+                // ADR 0024: an absolute target is not an escape, it is how
+                // distros ship `/etc/alternatives`. It cannot be honoured
+                // inside an extraction root and cannot be followed out of one
+                // either, so the entry is dropped and counted.
+                LinkTarget::Absolute => {
+                    stats.skipped_absolute_links += 1;
+                    continue;
+                }
+                LinkTarget::Escapes => {
+                    return Err(ExtractError::Unsafe(format!(
+                        "symlink `{}` escapes root",
+                        path.display()
+                    )))
+                }
             }
             ensure_parents(root, &components)?;
             // Replace any existing node at this path (later layers overwrite).

@@ -136,9 +136,11 @@ impl Sandbox {
     }
 
     fn extract(&self, layers: &[Vec<u8>]) -> Result<(), String> {
-        extract_image(layers, &self.root)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        self.extract_stats(layers).map(|_| ())
+    }
+
+    fn extract_stats(&self, layers: &[Vec<u8>]) -> Result<multiscan_sca::image::Stats, String> {
+        extract_image(layers, &self.root).map_err(|e| e.to_string())
     }
 
     fn root_join(&self, p: &str) -> std::path::PathBuf {
@@ -199,15 +201,85 @@ fn write_through_escaping_symlink_is_blocked() {
     sb.assert_canary_intact();
 }
 
-/// A symlink to an absolute path outside root is rejected.
+/// A symlink to an absolute path is never created inside the root — but it is
+/// dropped, not fatal (ADR 0024). It is ordinary distro content, and refusing
+/// the whole layer over one made every Debian-family image unscannable.
 #[test]
-fn absolute_symlink_target_rejected() {
+fn absolute_symlink_target_skipped_not_fatal() {
     let sb = sandbox();
-    let l = layer(&[E::Symlink("link", "/etc/passwd")]);
-    let _ = sb.extract(&[l]);
+    let l = layer(&[
+        E::Symlink("link", "/etc/passwd"),
+        E::File("var/lib/dpkg/status", b"Package: bash\n"),
+    ]);
+    let stats = sb
+        .extract_stats(&[l])
+        .expect("an absolute target is not hostile");
     sb.assert_canary_intact();
-    // The dangling escape symlink must not have been created.
+    // The link is not in the tree, and nothing was followed to create it.
     assert!(!sb.root_join("link").exists());
+    assert!(!sb.root_join("link").is_symlink());
+    assert_eq!(stats.skipped_absolute_links, 1);
+    // The rest of the layer still extracted — this is the whole point.
+    assert!(sb.root_join("var/lib/dpkg/status").exists());
+}
+
+/// The hostile shape stays fatal: a relative target that climbs above the
+/// root is the RUSTSEC-2026-0148 escape, and no real layer contains one.
+#[test]
+fn relative_symlink_climbing_above_root_is_still_fatal() {
+    let sb = sandbox();
+    let l = layer(&[E::Symlink("deep/link", "../../../canary")]);
+    let err = sb.extract(&[l]).expect_err("escape must stay a hard error");
+    assert!(err.contains("escapes root"), "unexpected error: {err}");
+    sb.assert_canary_intact();
+    assert!(!sb.root_join("deep/link").is_symlink());
+}
+
+/// A relative target that dips through `..` but lands back inside is normal
+/// image content (`etc/os-release -> ../usr/lib/os-release`) and is created.
+#[test]
+fn relative_target_resolving_inside_root_is_created() {
+    let sb = sandbox();
+    let l = layer(&[
+        E::File("usr/lib/os-release", b"ID=debian\n"),
+        E::Symlink("etc/os-release", "../usr/lib/os-release"),
+    ]);
+    let stats = sb.extract_stats(&[l]).expect("resolves inside the root");
+    assert_eq!(stats.skipped_absolute_links, 0);
+    assert!(sb.root_join("etc/os-release").is_symlink());
+    assert_eq!(
+        std::fs::read(sb.root_join("etc/os-release")).unwrap(),
+        b"ID=debian\n"
+    );
+    sb.assert_canary_intact();
+}
+
+/// The shape that actually broke: stock `debian:12` ships 49 absolute
+/// symlinks from the alternatives system alongside the package database.
+/// Extraction must complete and leave the inventory readable.
+#[test]
+fn debian_shaped_layer_extracts_despite_alternatives_links() {
+    let sb = sandbox();
+    let l = layer(&[
+        E::Dir("etc/alternatives"),
+        E::Symlink("etc/alternatives/awk", "/usr/bin/mawk"),
+        E::Symlink("etc/alternatives/pager", "/bin/more"),
+        E::Symlink("etc/alternatives/nawk", "/usr/bin/mawk"),
+        E::File("usr/lib/os-release", b"ID=debian\nVERSION_ID=\"12\"\n"),
+        E::Symlink("etc/os-release", "../usr/lib/os-release"),
+        E::File(
+            "var/lib/dpkg/status",
+            b"Package: openssl\nStatus: install ok installed\nVersion: 3.0.11-1\n",
+        ),
+        E::Symlink("bin", "usr/bin"),
+    ]);
+    let stats = sb
+        .extract_stats(&[l])
+        .expect("a stock Debian layer must extract");
+    assert_eq!(stats.skipped_absolute_links, 3);
+    assert_eq!(stats.symlinks, 2, "the two relative links are created");
+    assert!(sb.root_join("var/lib/dpkg/status").exists());
+    sb.assert_canary_intact();
 }
 
 /// A hardlink whose target escapes root is rejected.

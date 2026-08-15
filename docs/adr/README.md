@@ -32,6 +32,7 @@ rewrite.
 | [0021](0021-entropy-source-shapes.md) | Source shapes — identifiers and paths — are exempt from the entropy fallback | Accepted | Extends §7.2 and ADR 0005; widens FP-001 past machine-generated content, keeps FP-002 |
 | [0022](0022-distro-osv-ecosystems.md) | Mirror the distro OSV ecosystems, and match them on a normalized distro key | Accepted | Extends §10/§7.1; realizes FR-002 for OS packages |
 | [0023](0023-distro-advisory-cve-identity.md) | Distro advisories carry their CVE in `related`/`upstream` — key identity on it | Accepted | **Amends** §7.7.2 identity tuples (extends ADR 0012) |
+| [0024](0024-absolute-symlink-targets-are-skipped.md) | An absolute symlink target is skipped, not hostile | Accepted | Extends §7.1 / SCA-005 extraction policy |
 
 ## Conventions
 

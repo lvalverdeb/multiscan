@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1210,7 +1210,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-engine"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "globset",
  "multiscan-core",
@@ -1220,7 +1220,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-feeds"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "chrono",
@@ -1248,7 +1248,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-sast"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "multiscan-core",
@@ -1266,7 +1266,7 @@ dependencies = [
 
 [[package]]
 name = "multiscan-sca"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "cap-std",
  "debversion",
